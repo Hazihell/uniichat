@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 
-import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { err_why } from "./Err.ts";
@@ -58,26 +57,6 @@ function fail(why: string): never {
 
 const WIN  = process.platform === "win32";
 const BUN  = /^bun(\.exe)?$/i.test(path.basename(process.execPath));
-
-function update(): void {
-  if (BUN) {
-    fail("this unii runs from source (bun): update it with git.");
-  }
-  const cmd = Update.update_cmd(WIN);
-  console.error(cmd);
-  const run = WIN ? powershell_exiting_as_installer(cmd) : ["sh", "-c", cmd];
-  process.exitCode = child.spawnSync(run[0], run.slice(1), { stdio: "inherit", env: updater_env() }).status ?? 1;
-}
-
-const FAILED_TILL_INSTALLER_EXITS = "$global:LASTEXITCODE = 1; ";
-
-function powershell_exiting_as_installer(cmd: string): string[] {
-  return [Bun.which("pwsh") ?? "powershell.exe", "-NoProfile", "-Command", "$ErrorActionPreference = 'Stop'; " + FAILED_TILL_INSTALLER_EXITS + cmd + "; exit $LASTEXITCODE"];
-}
-
-function updater_env(): Record<string, string | undefined> {
-  return { ...process.env, UNII_UPDATER: String(process.pid), UNII_BIN: process.execPath };
-}
 
 function unmark_from_parent_shell(): void {
   for (const k of ["UNII_RUN", "UNII_AGENT", "INVOCATION_ID"]) {
@@ -165,7 +144,7 @@ const TREE: Cmd = { use: "unii [url]", about: "the chat in this terminal", url: 
     plan("claude", "your Claude plan (claude-sub)"),
     plan("chatgpt", "your ChatGPT plan (openai-sub)"),
   ] },
-  { use: "update", about: "install the newest release", run: update },
+  { use: "update", about: "check for updates, update safely (`unii update help`)" },
   { use: "version", about: "this unii's version", run: () => console.log("unii " + Update.VERSION) },
   { use: "help", about: "this" },
 ] };
@@ -210,7 +189,9 @@ const fits =
   [...FLAG].every((f) => (f === "-d" && daemon !== undefined) || (f === "-f" && cmd.follow === true) || (f === "--service" && service_run !== null)) &&
   (SETS.length === 0 || service_run !== null);
 
-if (help || !fits) {
+if (REST[0] === "update" && !help) {
+  process.exit(await (await import("./Fork.ts")).update(ARGS.slice(ARGS.indexOf("update") + 1)));
+} else if (help || !fits) {
   const head = trail.length === 1 ? TREE.use : [...trail.slice(0, -1), cmd.use].join(" ");
   const all = rows(cmd, head, 0);
   const width = Math.max(31, ...all.map(([use]) => use.length + 2));

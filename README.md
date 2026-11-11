@@ -46,7 +46,7 @@ Windows (PowerShell, no admin needed):
 
 `irm https://github.com/arteeh/uniichat/releases/latest/download/install.ps1 | iex`
 
-Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` installs the newest release and restarts the background services on it.
+Either way you get one `unii` program (in `~/.local/bin`, or `%LOCALAPPDATA%\Programs\unii` on Windows). `unii update` checks upstream and the Agent SDK for news and where it touches your changes; `unii update apply` merges or bumps it in a worktree, tests it, installs it and restarts the background services on it; `unii update rollback` puts the previous program back (`unii update help`).
 
 Set up
 ------
