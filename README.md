@@ -96,6 +96,10 @@ Back up `~/.unii` first if you may want your chat back. Run `unii device stop` a
 Q&A
 ---
 
+**When Unii runs in WSL, `http://localhost:8788` times out in my Windows browser.**
+
+The server listens on IPv4 only, and Windows may resolve `localhost` to IPv6 `::1`: use `http://127.0.0.1:8788`.
+
 **Can Unii use my screen?**
 
 Not by itself: ask Unii to add a computer-use MCP server, such as [cua-driver](https://github.com/trycua/cua/tree/main/libs/cua-driver), to the device whose screen it should use.
