@@ -1,0 +1,9 @@
+{
+  "name": "unii-browser",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.25.2",
+    "@playwright/mcp": "0.0.85"
+  }
+}
