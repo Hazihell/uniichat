@@ -121,9 +121,9 @@ export type Server =
   | ({ $: "ack"; id: string } & Answer)
   | { $: "jobs"; ids: string[] }
   | { $: "job"; id: string; job: Job }
-  | { $: "chats"; chats: SideRow[] };
+  | { $: "chats"; chats: SideRow[]; main: boolean };
 
-export type SideRow = { name: string; brief: string; made: string; closed: string | null; busy: boolean };
+export type SideRow = { name: string; brief: string; made: string; closed: string | null; busy: boolean; unread: boolean };
 
 export type Sent = { text: string; images?: Blob[] };
 

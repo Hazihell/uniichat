@@ -58,6 +58,7 @@ type Log = {
   timed  : () => void;
   asked  : (a: Asked) => void;
   chats  : (args: Record<string, unknown>, signal: AbortSignal) => Promise<Out>;
+  job    : (side: string | null, who: string, text: string) => Promise<boolean>;
 };
 
 export type Tools = {
@@ -213,10 +214,10 @@ const MAIN = spec("main", "Reach the main chat, the one you are a side chat of: 
   at     : INT,
 }, ["action"]);
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
-function kit(who: string): Spec[] {
+function kit(dir: string): Spec[] {
   return TOOLS.map((t) => {
     const schema = t.schema as { properties: object; required: string[] };
-    const info = t.info + " It runs on the device named; a relative path is in <scratch>/" + who + ", your scratch folder there, <scratch> being the scratch dir Devices lists for it.";
+    const info = t.info + " It runs on the device named; a relative path is in <scratch>/" + dir + ", your scratch folder there, <scratch> being the scratch dir Devices lists for it.";
     return spec(t.name, info, { ...DEVICE, ...schema.properties }, ["device", ...schema.required]);
   });
 }
@@ -289,7 +290,8 @@ export namespace Tools {
 
   export function at_work(tools: Tools): Block {
     const names = Tools.working(tools).map(({ name, run }) => (run.limit === null ? name : name + " (" + limit_show(run.limit) + ")"));
-    const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.map((j) => j.id + " (" + [device, ...(j.agent === "main" ? [] : [j.agent]), j.command.replace(/\s+/g, " ").trim().slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
+    const mine = (agent: string) => Tools.owner(agent).side === tools.side;
+    const jobs = [...tools.devices].flatMap(([device, d]) => d.bg.jobs.filter((j) => mine(j.agent)).map((j) => j.id + " (" + [device, ...(Tools.owner(j.agent).who === "main" ? [] : [Tools.owner(j.agent).who]), j.command.replace(/\s+/g, " ").trim().slice(0, 60), Math.round((Date.now() - j.since) / 60e3) + " min"].join(", ") + ")"));
     return { text: "Agents at work now: " + (names.length === 0 ? "none." : names.join(", ") + ".") + (jobs.length === 0 ? "" : "\nJobs running: " + jobs.join(", ") + ".") + "\n\n", mark: false };
   }
 
@@ -419,7 +421,21 @@ export namespace Tools {
   }
 
   export function list(who: string, side: string | null = null): Spec[] {
-    return who === "main" ? [...OWN, ...BOSS, side === null ? SIDE : MAIN, ...kit(who), SKILL] : [...OWN, ...kit(who), SKILL];
+    return who === "main" ? [...OWN, ...BOSS, side === null ? SIDE : MAIN, ...kit(Tools.dir(side, who)), SKILL] : [...OWN, ...kit(Tools.dir(side, who)), SKILL];
+  }
+
+  // the scratch folder, and so the name a device gives its jobs: a side
+  // chat's own work runs in @name, its subagents' in @name.Agent
+  export function dir(side: string | null, who: string): string {
+    return side === null ? who : "@" + side + (who === "main" ? "" : "." + who);
+  }
+
+  export function owner(dir: string): { side: string | null; who: string } {
+    if (!dir.startsWith("@")) {
+      return { side: null, who: dir };
+    }
+    const [side, ...rest] = dir.slice(1).split(".");
+    return { side, who: rest.length === 0 ? "main" : rest.join(".") };
   }
 
   export function plugged(tools: Tools, who: string): boolean {
@@ -522,7 +538,7 @@ export namespace Tools {
       }
       default: {
         const { device, ...input } = args;
-        return Tools.job(tools, String(device), { name, input, cwd: who }, signal, id);
+        return Tools.job(tools, String(device), { name, input, cwd: Tools.dir(tools.side, who) }, signal, id);
       }
     }
   }
@@ -626,11 +642,16 @@ export namespace Tools {
     }
   }
 
-  // a job's report goes to the subagent that started it, as a tell; false:
-  // Unii's job, or one of a subagent stopped or gone, whose report goes to Unii
+  // a job's report goes to the chat that started it, and there to the
+  // subagent that did, as a tell; false: Unii's job, or one of a subagent
+  // stopped or gone, or of a side chat closed, whose report goes to Unii
   export async function job_done(tools: Tools, agent: string, text: string): Promise<boolean> {
-    const a = agent === "main" ? null : Tools.agent(tools, agent);
-    return a !== null && !a.run.halt.signal.aborted && (await Tools.tell(tools, agent, text)).startsWith("Sent.");
+    const { side, who } = Tools.owner(agent);
+    if (side !== tools.side) {
+      return await tools.log.job(side, who, text);
+    }
+    const a = who === "main" ? null : Tools.agent(tools, who);
+    return a !== null && !a.run.halt.signal.aborted && (await Tools.tell(tools, who, text)).startsWith("Sent.");
   }
 
   export function job_text(agent: string, text: string): string {
@@ -1022,7 +1043,7 @@ export namespace Tools {
   export async function sweep(tools: Tools, name: string): Promise<string[]> {
     const live = Tools.opened(tools).filter(([, d]) => [...d.terms.values()].some((t) => t.live()));
     const outs = await Promise.all(live.map(async ([device]) => {
-      const run = Tools.start_job(tools, device, { name: "halt", input: { agent: name }, cwd: "main" }, crypto.randomUUID());
+      const run = Tools.start_job(tools, device, { name: "halt", input: { agent: Tools.dir(tools.side, name) }, cwd: "main" }, crypto.randomUUID());
       if (typeof run === "string") {
         return null;
       }

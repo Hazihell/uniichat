@@ -611,10 +611,12 @@ function connect(): void {
   });
 }
 
-function chats_draw(chats: View.SideRow[]): void {
+function chats_draw(chats: View.SideRow[], main: boolean): void {
+  const other = (main && CHAT !== null) || chats.some((c) => c.unread && c.name !== CHAT);
   $(".chats").hidden = chats.length === 0 && CHAT === null;
   $(".chats span").textContent = CHAT ?? "main";
-  markup($("#chats ul"), Html.chats_html(chats, CHAT));
+  $(".chats").classList.toggle("unread", other);
+  markup($("#chats ul"), Html.chats_html(chats, CHAT, main));
   if (CHAT !== null) {
     const here = chats.find((c) => c.name === CHAT);
     document.title = CHAT + " · " + NAME;
@@ -626,7 +628,7 @@ function chats_draw(chats: View.SideRow[]): void {
 function notes_close(): void {
   const seen = () => APP === null && document.visibilityState === "visible";
   if (seen()) {
-    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications({ tag: "unii" })).then((notes) => notes.forEach((n) => seen() && n.close())).catch(() => {});
+    navigator.serviceWorker?.ready.then((reg) => reg.getNotifications({ tag: CHAT === null ? "unii" : "side-" + CHAT })).then((notes) => notes.forEach((n) => seen() && n.close())).catch(() => {});
   }
 }
 
@@ -664,7 +666,7 @@ async function lost(up: boolean, steady: boolean): Promise<boolean> {
 
 function hear(msg: View.Server): void {
   if (msg.$ === "chats") {
-    chats_draw(msg.chats);
+    chats_draw(msg.chats, msg.main);
     return;
   }
   if (msg.$ === "error" && v.refused !== null) {

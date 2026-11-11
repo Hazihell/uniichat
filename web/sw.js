@@ -45,30 +45,45 @@ self.addEventListener("push", (ev) => {
   let title = "UniiChat";
   let text = "";
   let tag = "unii";
+  let url = "/";
   try {
     const data = ev.data?.json();
     title = String(data?.title ?? title);
     text = String(data?.text ?? "");
     tag = String(data?.tag ?? tag);
+    url = String(data?.url ?? url);
   } catch {}
-  ev.waitUntil(notify(text, tag, title));
+  ev.waitUntil(notify(text, tag, title, url));
 });
 
-async function notify(text, tag, title) {
+// the side chat a page or push is for, "" for the main chat
+function chat_of(url) {
+  return new URL(url, location.origin).searchParams.get("chat") ?? "";
+}
+
+// a push for the chat already in front shows nothing; one for another does
+async function notify(text, tag, title, url) {
   const tabs = await self.clients.matchAll({ type: "window" });
-  if (QUIET && tabs.some((tab) => tab.focused)) {
+  if (QUIET && tabs.some((tab) => tab.focused && chat_of(tab.url) === chat_of(url))) {
     return;
   }
-  await self.registration.showNotification(title, { body: text, icon: "/icon-192.png", tag, renotify: true, requireInteraction: tag !== "unii" });
+  await self.registration.showNotification(title, { body: text, icon: "/icon-192.png", tag, renotify: true, requireInteraction: tag !== "unii" && !tag.startsWith("side-"), data: { url } });
 }
 
 self.addEventListener("notificationclick", (ev) => {
   ev.notification.close();
-  ev.waitUntil(open_chat());
+  ev.waitUntil(open_chat(String(ev.notification.data?.url ?? "/")));
 });
 
-async function open_chat() {
+// a tap opens the chat the push came from, in the open tab if there is one
+async function open_chat(url) {
   const tabs = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   const tab = tabs.find((t) => new URL(t.url).origin === location.origin);
-  return tab !== undefined ? tab.focus() : self.clients.openWindow("/");
+  if (tab === undefined) {
+    return self.clients.openWindow(url);
+  }
+  await tab.focus();
+  if (chat_of(tab.url) !== chat_of(url)) {
+    await tab.navigate(new URL(url, location.origin).href).catch(() => self.clients.openWindow(url));
+  }
 }

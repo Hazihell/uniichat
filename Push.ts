@@ -73,17 +73,18 @@ export namespace Push {
 
   // tag: a browser's notification it replaces (one per approval asked;
   // the replies share one)
-  export function notify(db: Database, text: string, tag = "unii"): void {
-    Push.phones(db, text);
-    Push.browsers(db, text, tag);
+  // url: the page a tap on it opens, a side chat's for its pushes
+  export function notify(db: Database, text: string, tag = "unii", url = "/"): void {
+    Push.phones(db, text, url);
+    Push.browsers(db, text, tag, url);
   }
 
-  export function phones(db: Database, text: string): void {
+  export function phones(db: Database, text: string, url = "/"): void {
     if (!config.APNS || !config.KEYS.apns) {
       return;
     }
         const phones = db.query("select token from pushes").all() as { token: string }[];
-    const body = JSON.stringify({ aps: { alert: { title: config.NAME, body: Push.gist(text) }, sound: "default" } });
+    const body = JSON.stringify({ aps: { alert: { title: config.NAME, body: Push.gist(text) }, sound: "default" }, url });
     for (const { token } of phones) {
       const link = Push.apns();
       const head = { ":method": "POST", ":path": "/3/device/" + token, authorization: "bearer " + Push.apns_jwt(), "apns-topic": config.APPLE.replace(/^[^.]*\./, ""), "apns-push-type": "alert" };
@@ -107,9 +108,9 @@ export namespace Push {
     return text.replace(/\s+/g, " ").slice(0, GIST);
   }
 
-  export function browsers(db: Database, text: string, tag: string): void {
+  export function browsers(db: Database, text: string, tag: string, url = "/"): void {
         const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
-    const body = JSON.stringify({ text: Push.gist(text), tag, title: config.NAME });
+    const body = JSON.stringify({ text: Push.gist(text), tag, title: config.NAME, url });
     for (const sub of subs) {
       void Push.send(sub, body).then((status) => {
         if (status === 404 || status === 410) {

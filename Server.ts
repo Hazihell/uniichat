@@ -29,7 +29,7 @@ import * as Timer from "./Timer.ts";
 import * as Pins from "./Pins.ts";
 import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
 import { JOB } from "./Machine.ts";
-import { ACTIVE, ASKS, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
+import { ACTIVE, ASKS, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type SideRow, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import { err_code, err_stack, err_why } from "./Err.ts";
 import { get, rec, text_of } from "./Json.ts";
@@ -244,6 +244,7 @@ export namespace Chat {
       timed  : () => Chat.timed(chat),
       asked  : (a) => Chat.asked(a),
       chats  : async (args, signal) => (chat.side === null ? Main.side_act(args) : await Main.main_act(chat, args, signal)),
+      job    : (side, who, text) => Main.job_to(side, who, text),
     }, side?.name ?? null, side === null ? undefined : Main.chat.tools.devices);
     Chat.keep_pick(mem.pick);
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
@@ -413,6 +414,7 @@ export namespace Chat {
   export function finish(chat: Chat): void {
     Chat.live(chat, chat.main, []);
     Chat.phone(chat);
+    Main.read_check(chat);
     Chat.after(chat);
     Chat.change(chat);
   }
@@ -855,7 +857,7 @@ export namespace Chat {
     const last = Memory.message(chat.mem, chat.mem.count - 1);
     const used = [...chat.socks].some((sock) => Date.now() - sock.data.active < ACTIVE_MS);
     if (!used && last !== null && (last.kind === "unii" || last.kind === "note")) {
-      Push.notify(Owner.open(), (chat.side === null ? "" : "[" + chat.side.name + "] ") + last.text, chat.side === null ? "unii" : "side-" + chat.side.name);
+      Push.notify(Owner.open(), (chat.side === null ? "" : "[" + chat.side.name + "] ") + last.text, chat.side === null ? "unii" : "side-" + chat.side.name, chat.side === null ? "/" : "/?chat=" + encodeURIComponent(chat.side.name));
     }
   }
 
@@ -1216,7 +1218,8 @@ export namespace Chat {
     chat.socks.add(sock);
     if (host === null) {
       Chat.send(sock, Chat.state(chat));
-      Chat.send(sock, { $: "chats", chats: Main.list() });
+      Main.seen(chat);
+      Chat.send(sock, Main.chats_msg());
       Chat.show(chat, sock);
       Chat.send(sock, { $: "live", live: chat.main.live });
       return;
@@ -1599,11 +1602,78 @@ export namespace Main {
     }
   }
 
-  export function list(): Array<Side & { busy: boolean }> {
+  export function list(): SideRow[] {
     return Main.side_names().flatMap((name) => {
-      const side = Main.sides.get(name)?.side ?? Main.side_read(name);
-      return side === null ? [] : [{ ...side, busy: Main.sides.get(name)?.main.busy ?? false }];
+      const chat = Main.sides.get(name);
+      const side = chat?.side ?? Main.side_read(name);
+      return side === null ? [] : [{ ...side, busy: chat?.main.busy ?? false, unread: chat !== undefined && Main.unread(chat) }];
     });
+  }
+
+  export function chats_msg(): Out {
+    return { $: "chats", chats: Main.list(), main: Main.unread(Main.chat) };
+  }
+
+  // how far the user has read each chat, by its message count: one with a
+  // reply or note past that shows a dot in the chats list
+  const READ = SIDES + "/read.json";
+  let read: Record<string, number> | null = null;
+
+  function reads(): Record<string, number> {
+    if (read === null) {
+      try {
+        const got: unknown = JSON.parse(fs.readFileSync(READ, "utf8"));
+        read = typeof got === "object" && got !== null ? (got as Record<string, number>) : {};
+      } catch {
+        read = {};
+      }
+    }
+    return read;
+  }
+
+  function key(chat: Chat): string {
+    return chat.side === null ? "" : chat.side.name;
+  }
+
+  export function unread(chat: Chat): boolean {
+    const last = Memory.message(chat.mem, chat.mem.count - 1);
+    return chat.mem.count > (reads()[key(chat)] ?? 0) && last !== null && (last.kind === "unii" || last.kind === "note");
+  }
+
+  export function seen(chat: Chat): void {
+    const was = Main.unread(chat);
+    if (reads()[key(chat)] === chat.mem.count) {
+      return;
+    }
+    reads()[key(chat)] = chat.mem.count;
+    fs.mkdirSync(SIDES, { recursive: true, mode: 0o700 });
+    write_whole(READ, JSON.stringify(reads()));
+    if (was) {
+      Main.chats_changed();
+    }
+  }
+
+  // a turn's end: read if the user is on that chat now, else its dot shows
+  export function read_check(chat: Chat): void {
+    const used = [...chat.socks].some((sock) => Date.now() - sock.data.active < ACTIVE_MS);
+    if (used) {
+      Main.seen(chat);
+    } else if (Main.unread(chat)) {
+      Main.chats_changed();
+    }
+  }
+
+  // a device's job report for a chat other than the one it came through
+  export async function job_to(side: string | null, who: string, text: string): Promise<boolean> {
+    const chat = side === null ? Main.chat : Main.sides.get(side);
+    if (chat === undefined || chat.side?.closed != null) {
+      return false;
+    }
+    if (who !== "main" && (await Tools.job_done(chat.tools, Tools.dir(side, who), text))) {
+      return true;
+    }
+    take(chat, Tools.job_text(who, text));
+    return true;
   }
 
   function take(chat: Chat, text: string): void {
@@ -1698,7 +1768,8 @@ export namespace Main {
   }
 
   export function chats_changed(): void {
-    Main.all().forEach((c) => Chat.all(c, { $: "chats", chats: Main.list() }));
+    const msg = Main.chats_msg();
+    Main.all().forEach((c) => Chat.all(c, msg));
   }
 
   export async function lock(): Promise<void> {
@@ -2048,6 +2119,9 @@ export namespace Main {
           const text = String(data);
           if (text === ACTIVE || text === IDLE) {
             ws.data.active = text === ACTIVE ? Date.now() : 0;
+            if (text === ACTIVE) {
+              Main.seen(Main.of(ws.data.chat));
+            }
           } else if (Main.of(ws.data.chat).socks.has(ws)) {
             void Chat.answer(Main.of(ws.data.chat), ws, text);
           }
