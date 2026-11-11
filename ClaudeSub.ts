@@ -475,7 +475,7 @@ export namespace ClaudeSub {
     await AskAI.steered(ask);
     const blocks = ask.blocks.filter((b) => b.text !== "");
     const taken = AskAI.taken(ask);
-    code.box.put([...blocks.map((b) => b.text), ...taken.map((say) => say.text)], [...(ask.imgs ?? []), ...taken.flatMap((say) => say.imgs)], blocks.slice(0, -1).findLastIndex((b) => b.mark));
+    code.box.put([...blocks.map((b) => b.text), ...taken.map((say) => say.text)], [...(ask.imgs ?? []), ...taken.flatMap((say) => say.imgs)], blocks.flatMap((b, k) => k < blocks.length - 1 && (b.mark || b.back === true) ? [k] : []));
   }
 
   // a kept Claude Code's turn goes on (after a limit's reset: lead), with
@@ -579,12 +579,10 @@ export namespace ClaudeSub {
     return results.map((b) => ({ kind: "echo", text: (get(b, "is_error") ? "error: " : "") + (AskAI.show(get(b, "content")) || "(no output)"), of: text_of(get(b, "tool_use_id")) }));
   }
 
-  // the messages Claude Code reads, as they come; closed: it ends. A put's
-  // text `mark` (-1: none) ends a cache entry, an hour's (ENV): the view's
-  // last whole block (Memory.view), so a turn reads the view the turn
-  // before cached. One only: a request takes four, and Claude Code marks
-  // two of its own (our system prompt, its last message), three if its
-  // system prompt isn't split at the boundary (ClaudeSub.options)
+  // The messages Claude Code reads, as they come; closed: it ends.
+  // The view's current and previous whole-block ends share the four cache
+  // slots with Claude Code's system and last-message marks. All are 1h (ENV);
+  // options splits the system at the boundary to keep Code to two marks.
   export function inbox() {
     const queue: SDKUserMessage[] = [];
     let wake = () => {};
@@ -593,7 +591,7 @@ export namespace ClaudeSub {
       queue.push({ type: "user", message: { role: "user", content: content as Exclude<SDKUserMessage["message"]["content"], string> }, parent_tool_use_id: null });
       wake();
     };
-    const put = (texts: string[], imgs: Img[], mark = -1) => push(Anthropic.content(texts, imgs).map((b, k) => (k === mark ? { ...b, cache_control: HOUR } : b)));
+    const put = (texts: string[], imgs: Img[], marks: number[] = []) => push(Anthropic.content(texts, imgs).map((b, k) => (marks.includes(k) ? { ...b, cache_control: HOUR } : b)));
     const close = () => {
       shut = true;
       wake();

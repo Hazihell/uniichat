@@ -106,6 +106,8 @@ const TTL: Record<Vendor, number> = {
 
 const PREFIXES = new Map<string, Prefix>();
 
+const VIEWS = new Map<string, number>();
+
 const UNLED: Flight = { begun: () => {}, end: () => {} };
 
 const COOL = 60e3;
@@ -254,6 +256,9 @@ export namespace AskAI {
 
   export function start(ask: Ask, on: (ev: Event) => void): Try {
     try {
+      if (ask.vendor.startsWith("claude")) {
+        ask = { ...ask, blocks: AskAI.view_blocks(ask) };
+      }
       return ask.vendor === "claude-sub" ? ClaudeSub.ask(ask, on) : Agent.ask(ask, on);
     } catch (err) {
       return { wake: () => {}, stop: () => {}, done: Promise.resolve(AskAI.end(err_why(err))) };
@@ -295,12 +300,30 @@ export namespace AskAI {
     return ask.blocks.slice(0, last + 1).map((b) => String((key = Bun.hash(b.text, key))));
   }
 
+  export function view_blocks(ask: Ask): Block[] {
+    const keys = AskAI.prefix_keys(ask);
+    const now = Date.now();
+    for (const [key, until] of VIEWS) {
+      if (until <= now) {
+        VIEWS.delete(key);
+      }
+    }
+    const back = keys.findLastIndex((key) => VIEWS.has(key));
+    if (keys.length > 0) {
+      VIEWS.set(keys[keys.length - 1], now + TTL[ask.vendor]);
+    }
+    return ask.blocks.map(({ back: _back, ...block }, k) => ({ ...block, ...(k === back && !block.mark ? { back: true } : {}) }));
+  }
+
   export async function single_flight(ask: Ask): Promise<Flight> {
     const keys = AskAI.prefix_keys(ask);
     const ttl = TTL[ask.vendor];
     for (;;) {
       const now = Date.now();
-      const k = keys.findLastIndex((key) => AskAI.warm_or_writing(key, now));
+      const k = keys.findLastIndex((key, i) => {
+        const reachable = !ask.vendor.startsWith("claude") || ask.blocks.some((b, j) => (b.mark || b.back === true) && j < keys.length && i <= j && j - i < 20);
+        return reachable && AskAI.warm_or_writing(key, now);
+      });
       const got = k < 0 ? null : PREFIXES.get(keys[k]) ?? null;
       if (got !== null && got.writing !== null) {
         await got.writing;
@@ -341,7 +364,7 @@ export namespace AskAI {
     const begun = () => {
       if (own.writing !== null) {
         own.writing = null;
-        own.warm_until = Date.now() + ttl;
+        own.warm_until = now + ttl;
         written();
       }
     };
