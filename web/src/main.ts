@@ -20,6 +20,7 @@ declare global {
   interface Window { webkit?: { messageHandlers?: { unii?: { postMessage: (msg: unknown) => void } } } }
 }
 
+const CHAT = new URLSearchParams(location.search).get("chat");
 const APP = window.webkit?.messageHandlers?.unii ?? null;
 
 const DESK = matchMedia("(hover: hover)");
@@ -102,7 +103,7 @@ async function boot(): Promise<void> {
   const tree = location.pathname === TREE ? TREE + (tree_view() ? "#view" : "") : null;
   const state: unknown = history.state;
   const pic = get(state, "pic") != null;
-  history.replaceState(null, "", PAGES.includes(location.pathname) ? "/settings" : tree ?? "/");
+  history.replaceState(null, "", with_chat(PAGES.includes(location.pathname) ? "/settings" : tree ?? "/"));
   if (pic) {
     history.back();
   }
@@ -603,11 +604,22 @@ function heard(out: View.Answer): void {
 
 function connect(): void {
   View.link_open(v, {
-    open : (query) => new WebSocket(location.origin.replace(/^http/, "ws") + "/ws" + query),
+    open : (query) => new WebSocket(location.origin.replace(/^http/, "ws") + "/ws" + query + (CHAT === null ? "" : "&chat=" + encodeURIComponent(CHAT))),
     post : (path, body) => fetch(path, { method: "POST", body: body as BodyInit }),
     hear : hear,
     lost : lost,
   });
+}
+
+function chats_draw(chats: View.SideRow[]): void {
+  $(".chats").hidden = chats.length === 0 && CHAT === null;
+  $(".chats span").textContent = CHAT ?? "main";
+  markup($("#chats ul"), Html.chats_html(chats, CHAT));
+  if (CHAT !== null) {
+    const here = chats.find((c) => c.name === CHAT);
+    document.title = CHAT + " · " + NAME;
+    $(".composer").classList.toggle("closed", here?.closed != null);
+  }
 }
 
 // only while the app is still in view once they are found
@@ -651,6 +663,10 @@ async function lost(up: boolean, steady: boolean): Promise<boolean> {
 }
 
 function hear(msg: View.Server): void {
+  if (msg.$ === "chats") {
+    chats_draw(msg.chats);
+    return;
+  }
   if (msg.$ === "error" && v.refused !== null) {
     const old = v.refused.old;
     if (old && msg.build !== undefined) {
@@ -1073,9 +1089,18 @@ function mine_above(el: HTMLElement): boolean {
   return el.getBoundingClientRect().top < $("header").getBoundingClientRect().bottom;
 }
 
+// a side chat's page keeps its ?chat= on every page of it, for the requests it sends
+function with_chat(path: string): string {
+  if (CHAT === null) {
+    return path;
+  }
+  const [base, hash] = path.split("#");
+  return base + "?chat=" + encodeURIComponent(CHAT) + (hash === undefined ? "" : "#" + hash);
+}
+
 function go(path: string): void {
   if (location.pathname + location.hash !== path) {
-    history.pushState(null, "", path);
+    history.pushState(null, "", with_chat(path));
   }
   route();
 }

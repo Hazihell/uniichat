@@ -162,6 +162,21 @@ export function tabs_html(tabs: View.Tab[]): string[] {
   });
 }
 
+export function chats_html(chats: View.SideRow[], here: string | null): string[] {
+  const row = (name: string | null, text: string, note: string, closed: boolean) => {
+    const href = name === null ? "/" : "/?chat=" + encodeURIComponent(name);
+    const mark = name === here ? ` aria-current="page"` : "";
+    return `<li${closed ? ` class="closed"` : ""}><a href="${esc(href)}"${mark}><span class="name">${esc(text)}</span><span class="note">${esc(note)}</span></a></li>`;
+  };
+  const open = chats.filter((c) => c.closed === null);
+  const closed = chats.filter((c) => c.closed !== null);
+  return [
+    row(null, "Main chat", "everything else", false),
+    ...open.map((c) => row(c.name, c.name, (c.busy ? "working · " : "") + c.brief.replace(/\s+/g, " ").slice(0, 80), false)),
+    ...closed.map((c) => row(c.name, c.name, "closed " + (c.closed ?? "").slice(0, 10), true)),
+  ];
+}
+
 export function timers_html(timers: Timer.Timer[]): string[] {
   return timers.map((t) => {
     const cancel = `<button class="cancel"${act_html({ $: "Unschedule", id: t.id })}>Cancel</button>`;

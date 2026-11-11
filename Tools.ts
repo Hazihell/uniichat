@@ -57,6 +57,7 @@ type Log = {
   change : () => void;
   timed  : () => void;
   asked  : (a: Asked) => void;
+  chats  : (args: Record<string, unknown>, signal: AbortSignal) => Promise<Out>;
 };
 
 export type Tools = {
@@ -71,6 +72,7 @@ export type Tools = {
   main    : Run<Pending, Msg>;
   log     : Log;
   gate    : Gate;
+  side    : string | null;
 };
 
 export const SEARCHES = 10;
@@ -192,6 +194,24 @@ const BOSS: Spec[] = [
   }, ["action"]),
   spec("resume", "Wake every call on this server waiting for an AI service's usage limit (subagents, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
+const SIDE = spec("side", "Manage the side chats, each for one goal or project, with its own memory, the pins and read access to this chat's memory: open one (name: a short slug, brief: the goal and everything it needs from this chat, whole, as it knows nothing else), list them, tell one something (it reaches it as a message from the main chat, starting a turn), or close one: it gets the message to write its closing report, which reaches you, and then the chat ends, its memory kept. Close one only when the user agrees its goal is over.", {
+  action  : { type: "string", enum: ["open", "list", "tell", "close"] },
+  name    : STR,
+  brief   : STR,
+  message : STR,
+}, ["action"]);
+const MAIN = spec("main", "Reach the main chat, the one you are a side chat of: search or zoom its memory (read only; same arguments as your own search and zoom), report to it (text: what it should know or decide; it starts a turn there), or close this side chat with its closing report (text: what was done, decided and learned, and what is left), when the main chat asked for it or the user agrees the goal is over.", {
+  action : { type: "string", enum: ["search", "zoom", "report", "close"] },
+  text   : STR,
+  query  : STR,
+  since  : STR,
+  until  : STR,
+  limit  : INT,
+  after  : INT,
+  id     : INT,
+  n      : INT,
+  at     : INT,
+}, ["action"]);
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
 function kit(who: string): Spec[] {
   return TOOLS.map((t) => {
@@ -204,13 +224,14 @@ const SKILL: Spec = spec("skill", "Load a skill listed under Skills: its SKILL.m
 
 export namespace Tools {
 
-  export function serve(mem: Memory, main: Run<Pending, Msg>, log: Log): Tools {
+  // a side chat shares the main chat's devices: one connection per computer
+  export function serve(mem: Memory, main: Run<Pending, Msg>, log: Log, side: string | null = null, devices = new Map<string, Device>()): Tools {
     const key = crypto.randomUUID();
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
     const mcp = Mcp.servers((text) => log.note(text), run, (device) => Tools.live(tools.devices.get(device)));
     const gate = Gate.open(mem.dir + "/asks.json", () => log.change());
-    const tools: Tools = { mem, devices: new Map(), agents: new Map(), mcp, next: null, left: false, key, url, main, log, gate };
+    const tools: Tools = { mem, devices, agents: new Map(), mcp, next: null, left: false, key, url, main, log, gate, side };
     CHATS.set(key, tools);
     return tools;
   }
@@ -326,12 +347,12 @@ export namespace Tools {
         const notes = plugged ? Mcp.heard(tools.mcp, Tools.off(tools), who) : [];
         const agent = tools.agents.get(who);
         notes.forEach((text) => agent !== undefined && tools.log.push(agent.run, "note", text));
-        return { tools: [...Tools.list(who), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
+        return { tools: [...Tools.list(who, tools.side), ...theirs].map((t) => ({ name: t.name, description: t.info, inputSchema: t.schema })), notes };
       }
       case "tools/call": {
         const name = String(params.name);
         const args = rec(params.arguments) ? params.arguments : {};
-        const has = Tools.list(who).some((t) => t.name === name);
+        const has = Tools.list(who, tools.side).some((t) => t.name === name);
         const mcp = has ? null : Tools.mcp(tools, who, name);
         if (Tools.plugged(tools, who)) {
           Mcp.used(tools.mcp);
@@ -397,8 +418,8 @@ export namespace Tools {
     return null;
   }
 
-  export function list(who: string): Spec[] {
-    return who === "main" ? [...OWN, ...BOSS, ...kit(who), SKILL] : [...OWN, ...kit(who), SKILL];
+  export function list(who: string, side: string | null = null): Spec[] {
+    return who === "main" ? [...OWN, ...BOSS, side === null ? SIDE : MAIN, ...kit(who), SKILL] : [...OWN, ...kit(who), SKILL];
   }
 
   export function plugged(tools: Tools, who: string): boolean {
@@ -420,8 +441,8 @@ export namespace Tools {
     }
   }
 
-  export async function call(tools: Tools, who: string, name: string, args: Record<string, unknown>, signal: AbortSignal, id: string): Promise<Out> {
-    const mem = tools.mem;
+  // zoom, date and search on a chat's memory: this one's, or the main chat's for a side chat
+  export async function recall(mem: Memory, name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<Out> {
     switch (name) {
       case "zoom": {
         const id = String(args.id);
@@ -450,6 +471,20 @@ export namespace Tools {
           return { text: err_why(err), fail: true };
         }
       }
+      default: {
+        return { text: "No tool " + name + ".", fail: true };
+      }
+    }
+  }
+
+  export async function call(tools: Tools, who: string, name: string, args: Record<string, unknown>, signal: AbortSignal, id: string): Promise<Out> {
+    const mem = tools.mem;
+    switch (name) {
+      case "zoom":
+      case "date":
+      case "search": {
+        return await Tools.recall(mem, name, args, signal);
+      }
       case "spawn": {
         const tasks = Tools.spawns(args);
         return typeof tasks === "string" ? { text: tasks, fail: true } : { text: await Tools.spawn(tools, tasks), fail: false };
@@ -470,6 +505,10 @@ export namespace Tools {
       }
       case "pin": {
         return Pins.tool(args);
+      }
+      case "side":
+      case "main": {
+        return await tools.log.chats(args, signal);
       }
       case "stop": {
         return await Tools.halt(tools, String(args.name), args.why === undefined ? "" : text_of(args.why, "null"));

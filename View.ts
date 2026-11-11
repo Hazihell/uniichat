@@ -120,7 +120,10 @@ export type Server =
   | { $: "error"; text: string; build?: string; wire?: number }
   | ({ $: "ack"; id: string } & Answer)
   | { $: "jobs"; ids: string[] }
-  | { $: "job"; id: string; job: Job };
+  | { $: "job"; id: string; job: Job }
+  | { $: "chats"; chats: SideRow[] };
+
+export type SideRow = { name: string; brief: string; made: string; closed: string | null; busy: boolean };
 
 export type Sent = { text: string; images?: Blob[] };
 

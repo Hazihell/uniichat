@@ -5,7 +5,8 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
 import type { ServerWebSocket } from "bun";
-import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Say, type Vendor } from "./AskAI.ts";
+import type { Out as ToolOut } from "./Agent.ts";
+import { AskAI, GO_ON, type Ask, type Block, type Call, type End, type Event, type Kind, type Parked, type Said, type Say, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
 import { Gate, type Asked } from "./Gate.ts";
@@ -46,7 +47,7 @@ import icon_mask_192 from "./web/icon-maskable-192.png" with { type: "file" };
 import icon_mask from "./web/icon-maskable-512.png" with { type: "file" };
 import icon_apple from "./web/apple-touch-icon.png" with { type: "file" };
 
-type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; host: string | null; work: string; scratch: string | null; shell: string | null; device: string | null; seen: Set<string>; active: number }>;
+type Sock = ServerWebSocket<{ who: string; tab: string; wire: string | null; host: string | null; work: string; scratch: string | null; shell: string | null; device: string | null; seen: Set<string>; active: number; chat: string | null }>;
 
 type Body = { fh: fs.promises.FileHandle; size: number };
 
@@ -69,7 +70,12 @@ type Parts = {
   pick  : Pick;
   eye   : Eye;
   batch : Batch | null;
+  side  : Side | null;
 };
+
+// a side chat: one goal or project, its own memory folder under SIDES, the
+// pins, read access to the main chat's memory, and one closing report back
+type Side = { name: string; brief: string; made: string; closed: string | null };
 
 type Doing = {
   acts  : Map<string, Promise<Answer>>;
@@ -100,6 +106,8 @@ const PID        = config.DIR + "/server.pid";
 const SETTLE     = 200;
 const SHOWN      = 100;
 const CHAT       = config.DIR + "/chat";
+const SIDES      = config.DIR + "/chats";
+const SIDE_NAME  = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const HEAD       = "Turn:\n\n";
 const GOAL       = name_text("You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.", config.NAME);
 const GOAL_ASK   = "\nThe goal:\n\n";
@@ -205,10 +213,12 @@ let bell: ReturnType<typeof setTimeout> | undefined;
 
 export namespace Chat {
 
-  export function open(): Chat {
-    const mem = Memory.load(CHAT, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
+  export function open(dir = CHAT, side: Side | null = null): Chat {
+    const mem = Memory.load(dir, () => ({ system: Tools.prompt("compact"), searches: 0, server: "" }), Owner.act_put);
     const cut = mem.work;
-    Limit.answering(() => ({ queued: Run.waiting(chat.main), busy: chat.main.busy }));
+    if (side === null) {
+      Limit.answering(() => ({ queued: Run.waiting(chat.main), busy: chat.main.busy }));
+    }
     const main = Run.make<Pending, Msg>(TURN, {
       pick   : () => chat.pick,
       begin  : () => Chat.begin(chat),
@@ -233,11 +243,12 @@ export namespace Chat {
       change : () => Chat.change(chat),
       timed  : () => Chat.timed(chat),
       asked  : (a) => Chat.asked(a),
-    });
+      chats  : async (args, signal) => (chat.side === null ? Main.side_act(args) : await Main.main_act(chat, args, signal)),
+    }, side?.name ?? null, side === null ? undefined : Main.chat.tools.devices);
     Chat.keep_pick(mem.pick);
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
     const chat: Chat = {
-      mem, tools, pick, socks: new Set(), acts: new Map(), main, model: "", check: null, asked: false, open: 0,
+      mem, tools, pick, socks: new Set(), acts: new Map(), main, side, model: "", check: null, asked: false, open: 0,
       eye: { parts: [], from: 0 }, after: Promise.resolve(), batch: null, writes: Promise.resolve(), held: null, back: -1, sums: null, resume: null, limits: null,
     };
     const saved = mem.pick === null ? null : Chat.pick_name(mem.pick as Pick);
@@ -248,7 +259,7 @@ export namespace Chat {
       Chat.keep_pick(mem.pick);
       Chat.note(chat, saved + " isn't offered here, so the chat now runs on " + Chat.pick_name(pick) + ".");
     }
-    if (mem.count === 0) {
+    if (mem.count === 0 && side === null) {
       Memory.push(mem, [{ kind: "unii", text: HELLO, line: HELLO_LINE }]);
     }
     chat.eye = Chat.eye(mem, Memory.turn(mem));
@@ -256,8 +267,10 @@ export namespace Chat {
     mem.wait.add(() => Chat.progress(chat));
     chat.batch = Chat.resumed(chat);
     Chat.timed(chat);
-    Chat.sweep(chat);
-    setInterval(() => Chat.sweep(chat), SWEEP).unref();
+    if (side === null) {
+      Chat.sweep(chat);
+      setInterval(() => Chat.sweep(chat), SWEEP).unref();
+    }
     Memory.pump(mem);
     Chat.progress(chat);
     Chat.resume(chat, cut).finally(() => Chat.change(chat)).catch((err: unknown) => console.error("unii: resuming the chat: " + err_why(err)));
@@ -454,7 +467,7 @@ export namespace Chat {
     const server = Tools.at(chat.tools, "main");
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
-    const blocks = [...view, Pins.block(true), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
+    const blocks = [...view, Pins.block(true), ...Chat.side_block(chat), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
     const model = chat.pick.model;
     const used = (tokens: number) => {
       if (chat.pick.model === model) {
@@ -592,6 +605,15 @@ export namespace Chat {
   }
 
   // the pins whose time is up leave quietly, a note each, no push
+  export function side_block(chat: Chat): Block[] {
+    const side = chat.side;
+    if (side === null) {
+      return [];
+    }
+    const text = "This is the side chat \"" + side.name + "\" of the user's main chat, opened " + side.made.slice(0, 10) + (side.closed === null ? "" : ", closed " + side.closed.slice(0, 10)) + ", for one goal. Its brief, from the main chat:\n" + side.brief + "\nWork on that goal with the user here. The main chat's memory is yours to read with the main tool (search, zoom); report there only what the main chat must know or decide; when the goal is over and the user agrees, close this chat with its closing report.\n\n";
+    return [{ text, mark: false }];
+  }
+
   export function sweep(chat: Chat): void {
     Pins.sweep().forEach(({ pin, why }) => Chat.note(chat, "📌 unpinned (" + why + "): " + Pins.line(pin)));
   }
@@ -683,7 +705,7 @@ export namespace Chat {
 
   export function guess(chat: Chat): number {
     const mem = chat.mem;
-    const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Pins.block(true), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools)];
+    const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Pins.block(true), ...Chat.side_block(chat), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools)];
     const texts = [Tools.prompt("prompt"), JSON.stringify(Tools.list("main")), ...blocks.map((b) => b.text)];
     return Math.ceil(texts.reduce((n, text) => n + Memory.bytes(text), 0) / TOKEN);
   }
@@ -833,7 +855,7 @@ export namespace Chat {
     const last = Memory.message(chat.mem, chat.mem.count - 1);
     const used = [...chat.socks].some((sock) => Date.now() - sock.data.active < ACTIVE_MS);
     if (!used && last !== null && (last.kind === "unii" || last.kind === "note")) {
-      Push.notify(Owner.open(), last.text);
+      Push.notify(Owner.open(), (chat.side === null ? "" : "[" + chat.side.name + "] ") + last.text, chat.side === null ? "unii" : "side-" + chat.side.name);
     }
   }
 
@@ -1194,6 +1216,7 @@ export namespace Chat {
     chat.socks.add(sock);
     if (host === null) {
       Chat.send(sock, Chat.state(chat));
+      Chat.send(sock, { $: "chats", chats: Main.list() });
       Chat.show(chat, sock);
       Chat.send(sock, { $: "live", live: chat.main.live });
       return;
@@ -1513,6 +1536,170 @@ export namespace Main {
 
   export let chat: Chat;
   export let server: Bun.Server<Sock["data"]>;
+  export const sides = new Map<string, Chat>();
+
+  // a closed side chat opens again when its page is visited, read as closed
+  export function of(name: string | null): Chat {
+    if (name === null) {
+      return Main.chat;
+    }
+    const side = Main.sides.has(name) || !SIDE_NAME.test(name) ? null : Main.side_read(name);
+    if (side !== null) {
+      Main.sides.set(name, Chat.open(SIDES + "/" + name, side));
+    }
+    return Main.sides.get(name) ?? Main.chat;
+  }
+
+  // the chat a request is for: its ?chat=, or the page's that sent it
+  export function chat_name(req: Request): string | null {
+    const own = new URL(req.url).searchParams.get("chat");
+    if (own !== null) {
+      return own;
+    }
+    try {
+      return new URL(req.headers.get("referer") ?? "").searchParams.get("chat");
+    } catch {
+      return null;
+    }
+  }
+
+  export function all(): Chat[] {
+    return [Main.chat, ...Main.sides.values()];
+  }
+
+  export function side_file(name: string): string {
+    return SIDES + "/" + name + "/side.json";
+  }
+
+  export function side_read(name: string): Side | null {
+    try {
+      const got: unknown = JSON.parse(fs.readFileSync(Main.side_file(name), "utf8"));
+      const [brief, made, closed] = [get(got, "brief"), get(got, "made"), get(got, "closed")];
+      return typeof brief === "string" && typeof made === "string" ? { name, brief, made, closed: typeof closed === "string" ? closed : null } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  export function side_names(): string[] {
+    try {
+      return fs.readdirSync(SIDES).filter((n) => SIDE_NAME.test(n)).sort();
+    } catch {
+      return [];
+    }
+  }
+
+  // every side chat still open comes back with the server
+  export function sides_open(): void {
+    for (const name of Main.side_names()) {
+      const side = Main.side_read(name);
+      if (side !== null && side.closed === null) {
+        Main.sides.set(name, Chat.open(SIDES + "/" + name, side));
+      }
+    }
+  }
+
+  export function list(): Array<Side & { busy: boolean }> {
+    return Main.side_names().flatMap((name) => {
+      const side = Main.sides.get(name)?.side ?? Main.side_read(name);
+      return side === null ? [] : [{ ...side, busy: Main.sides.get(name)?.main.busy ?? false }];
+    });
+  }
+
+  function take(chat: Chat, text: string): void {
+    void Run.take(chat.main, { kind: "work", text, images: [] });
+    Chat.change(chat);
+  }
+
+  // the main chat's side tool
+  export function side_act(args: Record<string, unknown>): ToolOut {
+    const name = text_of(args.name, "");
+    const fail = (text: string): ToolOut => ({ text, fail: true });
+    switch (args.action) {
+      case "list": {
+        const lines = Main.list().map((s) => "- " + s.name + " (" + (s.closed === null ? (s.busy ? "working" : "open") : "closed " + s.closed.slice(0, 10)) + ", since " + s.made.slice(0, 10) + "): " + s.brief.replace(/\s+/g, " ").slice(0, 120));
+        return { text: lines.length === 0 ? "No side chats." : lines.join("\n"), fail: false };
+      }
+      case "open": {
+        const brief = text_of(args.brief, "").trim();
+        if (!SIDE_NAME.test(name)) {
+          return fail("A side chat's name is a short slug: lowercase letters, digits and dashes, up to 40.");
+        }
+        if (brief === "") {
+          return fail("A side chat starts from its brief: give it.");
+        }
+        if (fs.existsSync(SIDES + "/" + name)) {
+          return fail("There is already a side chat " + name + ".");
+        }
+        const side: Side = { name, brief, made: new Date().toISOString(), closed: null };
+        fs.mkdirSync(SIDES + "/" + name, { recursive: true, mode: 0o700 });
+        write_whole(Main.side_file(name), JSON.stringify(side, null, 2));
+        const chat = Chat.open(SIDES + "/" + name, side);
+        Main.sides.set(name, chat);
+        take(chat, "[Main chat] Side chat " + name + " opened. Brief:\n" + brief + "\n\nGreet the user in a line or two, saying what you will do first, then start.");
+        Main.chats_changed();
+        return { text: "Opened the side chat " + name + "; it starts on its brief now.", fail: false };
+      }
+      case "tell": {
+        const chat = Main.sides.get(name);
+        if (chat === undefined) {
+          return fail("No open side chat " + name + ".");
+        }
+        take(chat, "[Main chat] " + text_of(args.message, ""));
+        return { text: "Told " + name + ".", fail: false };
+      }
+      case "close": {
+        const chat = Main.sides.get(name);
+        if (chat === undefined) {
+          return fail("No open side chat " + name + ".");
+        }
+        take(chat, "[Main chat] Close this side chat: write its closing report (what was done, decided and learned, and what is left) and send it with the main tool, action close.");
+        return { text: "Asked " + name + " for its closing report; it reaches you when it closes.", fail: false };
+      }
+      default: {
+        return fail("action is open, list, tell or close.");
+      }
+    }
+  }
+
+  // a side chat's main tool
+  export async function main_act(chat: Chat, args: Record<string, unknown>, signal: AbortSignal): Promise<ToolOut> {
+    const side = chat.side as Side;
+    const text = text_of(args.text, "").trim();
+    switch (args.action) {
+      case "search":
+      case "zoom": {
+        return await Tools.recall(Main.chat.mem, args.action, args, signal);
+      }
+      case "report": {
+        if (text === "") {
+          return { text: "A report needs its text.", fail: true };
+        }
+        Chat.report(Main.chat, "[Side " + side.name + "] " + text, true);
+        return { text: "Reported to the main chat.", fail: false };
+      }
+      case "close": {
+        if (side.closed !== null) {
+          return { text: "This side chat is closed already.", fail: true };
+        }
+        if (text === "") {
+          return { text: "Closing needs the closing report.", fail: true };
+        }
+        side.closed = new Date().toISOString();
+        write_whole(Main.side_file(side.name), JSON.stringify(side, null, 2));
+        Chat.report(Main.chat, "[Side " + side.name + "] closed. Its closing report:\n" + text, true);
+        Main.chats_changed();
+        return { text: "Closed. The report reached the main chat; this chat's memory stays, read only.", fail: false };
+      }
+      default: {
+        return { text: "action is search, zoom, report or close.", fail: true };
+      }
+    }
+  }
+
+  export function chats_changed(): void {
+    Main.all().forEach((c) => Chat.all(c, { $: "chats", chats: Main.list() }));
+  }
 
   export async function lock(): Promise<void> {
     fs.mkdirSync(config.DIR, { recursive: true });
@@ -1643,7 +1830,7 @@ export namespace Main {
         return Response.json(out, { status: out.status ?? (out.error === undefined ? 200 : 400) });
       }
       case "/api/approve": {
-        return await Main.approve(req);
+        return await Main.approve(req, chat);
       }
       case "/api/imported": {
         return Response.json(Chat.done(chat));
@@ -1669,7 +1856,9 @@ export namespace Main {
       }
     }
     if (p.startsWith("/media/")) {
-      return Main.media(Memory.media_file(mem, p.slice("/media/".length)), req);
+      const name = p.slice("/media/".length);
+      const owner = [chat, ...Main.all()].find((c) => { const f = Memory.media_file(c.mem, name); return f !== null && fs.existsSync(f); }) ?? chat;
+      return Main.media(Memory.media_file(owner.mem, name), req);
     }
     const file = Memory.image_file(mem, p.slice("/image/".length));
     const keep = { "cache-control": "private, max-age=31536000, immutable" };
@@ -1796,10 +1985,13 @@ export namespace Main {
       if (p === "/ws") {
         const q    = new URL(req.url).searchParams;
         const who  = Owner.hash(Owner.token(req));
-        const data = { who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), work: q.get("work") ?? "~/.unii/work", scratch: q.get("scratch"), shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>(), active: 0 };
+        const data = { who, tab: q.get("tab") ?? "", wire: q.get("wire"), host: q.get("device"), work: q.get("work") ?? "~/.unii/work", scratch: q.get("scratch"), shell: q.get("shell") === "PowerShell" ? "PowerShell" : null, device: null, seen: new Set<string>(), active: 0, chat: q.get("device") === null ? q.get("chat") : null };
         return server.upgrade(req, { data }) ? undefined : new Response("upgrade failed", { status: 400 });
       }
-      return await Main.page(Main.chat, p, req);
+      if (p === "/api/chats") {
+        return Response.json(Main.list());
+      }
+      return await Main.page(Main.of(Main.chat_name(req)), p, req);
     } catch (err) {
       return Response.json({ error: err_why(err) }, { status: 500 });
     }
@@ -1829,6 +2021,7 @@ export namespace Main {
     Owner.open();
     Push.keys();
     Main.chat = Chat.open();
+    Main.sides_open();
     Main.watch();
     process.on("unhandledRejection", Main.unowned);
     Main.server = Bun.serve<Sock["data"]>({
@@ -1848,33 +2041,33 @@ export namespace Main {
               ws.send(JSON.stringify({ $: "error", text: "This page or unii is older than the server: reload or reopen it (`unii update` for the latest).", build: BUILD, wire: WIRE }));
               return;
             }
-            Chat.join(Main.chat, ws);
+            Chat.join(Main.of(ws.data.chat), ws);
           }, () => ws.close(1011));
         },
         message(ws: Sock, data) {
           const text = String(data);
           if (text === ACTIVE || text === IDLE) {
             ws.data.active = text === ACTIVE ? Date.now() : 0;
-          } else if (Main.chat.socks.has(ws)) {
-            void Chat.answer(Main.chat, ws, text);
+          } else if (Main.of(ws.data.chat).socks.has(ws)) {
+            void Chat.answer(Main.of(ws.data.chat), ws, text);
           }
         },
         close(ws: Sock, code) {
-          Main.event("a socket", () => Chat.leave(Main.chat, ws, code === QUIT));
+          Main.event("a socket", () => Chat.leave(Main.of(ws.data.chat), ws, code === QUIT));
         },
       },
     });
     setInterval(() => {
       const kept = Owner.kept();
-      Main.chat.socks.forEach((sock) => {
+      Main.all().forEach((chat) => chat.socks.forEach((sock) => {
         if (kept.has(sock.data.who)) {
           sock.send(TICK);
           return;
         }
-        Chat.leave(Main.chat, sock, true);
+        Chat.leave(chat, sock, true);
         sock.close(QUIT, "signed out");
-      });
-      Tools.prune(Main.chat.tools, kept);
+      }));
+      Main.all().forEach((chat) => Tools.prune(chat.tools, kept));
       Main.follow();
     }, PING / 2);
     for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
@@ -1882,8 +2075,10 @@ export namespace Main {
     }
     process.on("exit", () => {
       fs.rmSync(PID, { force: true });
-      Chat.stop(Main.chat, null);
-      Memory.stop(Main.chat.mem);
+      Main.all().forEach((chat) => {
+        Chat.stop(chat, null);
+        Memory.stop(chat.mem);
+      });
     });
     console.log("unii: " + config.SITE + ", data in " + config.DIR + ", on 127.0.0.1:" + port);
     Service.ready("serve");
@@ -1894,7 +2089,7 @@ export namespace Main {
     }
   }
 
-  export async function approve(req: Request): Promise<Response> {
+  export async function approve(req: Request, chat: Chat): Promise<Response> {
     if (req.method !== "POST") {
       return new Response("an answer is a POST", { status: 405 });
     }
@@ -1906,7 +2101,7 @@ export namespace Main {
     if (typeof id !== "string" || typeof ok !== "boolean" || typeof note !== "string") {
       return Response.json({ error: "An answer is { id, ok, note }." }, { status: 400 });
     }
-    const why = await Tools.decide(Main.chat.tools, id, ok, note.trim().slice(0, NOTE));
+    const why = await Tools.decide(chat.tools, id, ok, note.trim().slice(0, NOTE));
     return Response.json(why === null ? {} : { error: why }, { status: why === null ? 200 : 409 });
   }
 
