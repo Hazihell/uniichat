@@ -11,7 +11,7 @@ import { saved } from './store.js';
 import { challenge } from './challenge.js';
 
 const endpoint = process.env.UNII_BROWSER_ENDPOINT ?? 'http://127.0.0.1:9222';
-const allowed = new Set(['browser_navigate', 'browser_navigate_back', 'browser_snapshot', 'browser_click', 'browser_press_key', 'browser_hover', 'browser_tabs', 'browser_wait_for']);
+const withheld = new Set(['browser_install', 'browser_close']);
 const secrets = new Set();
 let secretEntries = {};
 const upstreamSecrets = new Proxy({}, {
@@ -25,7 +25,7 @@ const upstreamSecrets = new Proxy({}, {
 });
 const outputDir = process.env.UNII_BROWSER_OUTPUT ?? `${homedir()}/.local/state/unii-browser/mcp`;
 mkdirSync(outputDir, { recursive: true, mode: 0o700 });
-const upstream = await createConnection({ outputDir, browser: { cdpEndpoint: endpoint }, secrets: upstreamSecrets, imageResponses: 'omit', snapshot: { mode: 'full' } });
+const upstream = await createConnection({ outputDir, browser: { cdpEndpoint: endpoint }, secrets: upstreamSecrets, snapshot: { mode: 'full' } });
 const [local, remote] = InMemoryTransport.createLinkedPair();
 await upstream.connect(remote);
 const client = new Client({ name: 'brave-private', version: '1' });
@@ -62,13 +62,12 @@ function redact(value) {
   return value;
 }
 
-const policy = 'Read and authorized sign-in only. Never send, post, buy, email, delete data, or change account settings as Roger. Relay needs_roger to Roger; never bypass passkeys, push 2FA, codes or CAPTCHAs.';
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: (await client.listTools()).tools.filter(tool => allowed.has(tool.name)).map(tool => ({ ...tool, description: `${policy} ${tool.description}` })) }));
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: (await client.listTools()).tools.filter(tool => !withheld.has(tool.name)) }));
 let pending = Promise.resolve();
 server.setRequestHandler(CallToolRequestSchema, ({ params }) => {
   const run = pending.then(async () => {
     try {
-      if (!allowed.has(params.name) || params.arguments?.filename) return failed('unsupported_browser_operation');
+      if (withheld.has(params.name)) return failed('unsupported_browser_operation');
       if (params.name === 'browser_navigate') {
         const url = new URL(params.arguments?.url);
         if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return failed('unsupported_browser_url');
