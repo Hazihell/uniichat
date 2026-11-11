@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { name_html, name_text } from "./Name.ts";
 
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -99,16 +100,16 @@ const SETTLE     = 200;
 const SHOWN      = 100;
 const CHAT       = config.DIR + "/chat";
 const HEAD       = "Turn:\n\n";
-const GOAL       = "You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.";
+const GOAL       = name_text("You check a goal. Below is a chat between a user and Unii, an AI agent: its older messages as summary lines (id+n|text), then its latest messages whole, then the goal the user set with /goal. Answer yes if the chat shows the goal fully satisfied now, else no. Write that one word, nothing else.", config.NAME);
 const GOAL_ASK   = "\nThe goal:\n\n";
 const GOAL_NO    = "The goal isn't satisfied yet: keep working.";
 const TALK_FULL  = "Conversation mode switched itself off: it was full.";
 const TALK_SMALL = "Conversation mode switched itself off: too long for {model}.";
 const TALK_LONG  = "Conversation mode switched itself off: {model} refused the turn as too long.";
-const TALK_BIG   = "Conversation mode can't start: the messages since message {id} already fill its space in Unii's view.";
+const TALK_BIG   = name_text("Conversation mode can't start: the messages since message {id} already fill its space in Unii's view.", config.NAME);
 const TALK_IMP   = "Conversation mode switched itself off: the import filled it.";
 const TALK_OFF_AT = 0.9;
-const FULL       = "UniiChat's disk is full; try again soon.";
+const FULL       = name_text("UniiChat's disk is full; try again soon.", config.NAME);
 const BATCH      = "/import.json";
 const SPARE      = 2 ** 30;
 
@@ -138,8 +139,8 @@ const PIECE      = 2 ** 16;
 
 const OWN        = ["/ws", "/export"];
 
-const HELLO      = hello_md.trim().replace("{install}", config.SITE + "/install.sh");
-const HELLO_LINE = "unii: hello: UniiChat, one endless chat kept in a memory tree, recent days in more detail; build anything for years; recalls the past (ad2cat.py); a chatbot with a memory system; the user's terminal install.";
+const HELLO      = name_text(hello_md.trim(), config.NAME).replace("{install}", config.SITE + "/install.sh");
+const HELLO_LINE = name_text("unii: hello: UniiChat, one endless chat kept in a memory tree, recent days in more detail; build anything for years; recalls the past (ad2cat.py); a chatbot with a memory system; the user's terminal install.", config.NAME);
 
 // the site's page, index.html: imported as a file, a path (Bun's types
 // take any .html for an HTML bundle)
@@ -166,8 +167,8 @@ WEB["/settings"] = WEB["/"];
 WEB["/tree"]     = WEB["/"];
 
 const HASHED_INTO_BUILD = [app_js, style_css, PAGE, sw_js, manifest];
-const BUILD      = Bun.hash(HASHED_INTO_BUILD.map((f) => fs.readFileSync(f, "utf8")).join("\0")).toString(36);
-const INDEX      = fs.readFileSync(PAGE, "utf8").replace("<html ", `<html data-build="${BUILD}" `);
+const BUILD      = Bun.hash([config.NAME, ...HASHED_INTO_BUILD.map((f) => fs.readFileSync(f, "utf8"))].join("\0")).toString(36);
+const INDEX      = name_text(fs.readFileSync(PAGE, "utf8"), name_html(config.NAME)).replace("<html ", `<html data-name="${name_html(config.NAME)}" data-build="${BUILD}" `);
 const WORKER     = fs.readFileSync(sw_js, "utf8").replace("{build}", BUILD);
 const STAMPED_WITH_BUILD = new Map([[PAGE, INDEX], [sw_js, WORKER]]);
 
@@ -528,7 +529,7 @@ export namespace Chat {
   // message is work, UniiChat's own (a go-on, a restart, the goal) a note
   export function said(mem: Memory, a: number, b: number): Said {
     const { kind, text } = Memory.at(mem, a);
-    const from = kind === "user" ? "the user" : kind !== "work" ? "UniiChat" : text.startsWith("[Timer ") ? "the timer" : text.startsWith(JOB) ? "a job" : "a subagent";
+    const from = kind === "user" ? "the user" : kind !== "work" ? name_text("UniiChat", config.NAME) : text.startsWith("[Timer ") ? "the timer" : text.startsWith(JOB) ? "a job" : "a subagent";
     return { ...Memory.say(mem, a, b), from };
   }
 
@@ -847,7 +848,7 @@ export namespace Chat {
 
   export async function ingest(chat: Chat, id: string, body: Body): Promise<Answer> {
     if (chat.main.busy || chat.batch !== null) {
-      return { error: (chat.main.busy ? "Unii is answering" : "An import is under way") + ": import again once it ends." };
+      return { error: (chat.main.busy ? name_text("Unii is answering", config.NAME) : "An import is under way") + ": import again once it ends." };
     }
     const done = Chat.done(chat);
     let said = 0;
@@ -1136,7 +1137,7 @@ export namespace Chat {
         sent[run.name] = run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
       }
     }
-    return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, asks: Gate.shown(chat.tools.gate), build: BUILD, site: config.SITE };
+    return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, asks: Gate.shown(chat.tools.gate), build: BUILD, site: config.SITE, name: config.NAME };
   }
 
   export function sums(chat: Chat): Sums | null {
@@ -1191,7 +1192,7 @@ export namespace Chat {
     const link = { send: (msg: object) => Chat.send(sock, msg), live: () => chat.socks.has(sock), work, scratch, shell };
     sock.data.device = Tools.attach(chat.tools, tab, host, sock.data.who, link, Owner.kept());
     if (sock.data.device !== host) {
-      Chat.send(sock, { $: "note", text: host + " was taken: Unii calls this computer " + sock.data.device + "." });
+      Chat.send(sock, { $: "note", text: host + name_text(" was taken: Unii calls this computer ", config.NAME) + sock.data.device + "." });
     }
   }
 
@@ -1563,6 +1564,10 @@ export namespace Main {
   }
 
   export function file(pathname: string, req: Request): Response {
+    if (pathname === "/manifest.webmanifest") {
+      const body = JSON.parse(fs.readFileSync(manifest, "utf8")) as Record<string, unknown>;
+      return Response.json({ ...body, name: config.NAME, short_name: config.NAME }, { headers: { "content-type": "application/manifest+json", "cache-control": "no-cache" } });
+    }
     const file = WEB[pathname];
     if (file === undefined) {
       return new Response("not found", { status: 404 });
@@ -1730,7 +1735,7 @@ export namespace Main {
   }
 
   export async function prompts(req: Request): Promise<Response> {
-    const read = () => Object.fromEntries(Object.entries(PROMPTS).map(([k, p]) => [k, { text: Tools.prompt(k as keyof typeof PROMPTS), def: p.def }]));
+    const read = () => Object.fromEntries(Object.entries(PROMPTS).map(([k, p]) => [k, { text: Memory.file_text(p.file) || p.def, def: p.def }]));
     if (req.method !== "POST") {
       return Response.json(read());
     }

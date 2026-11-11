@@ -1,3 +1,4 @@
+import { name_text } from "../../Name.ts";
 import { must } from "./Dom.ts";
 
 type Meta = { count: number; has: string[]; parts: [number, number][]; view: Got[] };
@@ -79,7 +80,7 @@ function focus(which: Which): void {
 
 function tabs(which: Which): void {
   $(".prev").hidden = $(".next").hidden = which !== "TREE";
-  $(".legend").innerHTML = LEGEND[which];
+  $(".legend").textContent = name_text(LEGEND[which]);
   document.querySelectorAll<HTMLElement>("#tree .tab").forEach((a) => a.classList.toggle("here", a.dataset.tab === which));
   $(".view").classList.toggle("on", which === "VIEW");
   $(".bracket").classList.toggle("on", which === "TREE");

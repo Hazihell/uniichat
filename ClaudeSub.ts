@@ -482,8 +482,8 @@ export namespace ClaudeSub {
   // the messages steered in since, in one message: two would start two turns
   export async function go_on(code: Code, ask: Ask, lead: string[]): Promise<void> {
     const say = await AskAI.steered(ask);
-    const texts = [...lead.map((text) => AskAI.labeled({ text, imgs: [], from: "UniiChat" })), ...(say === null ? [] : [say.text])];
-    code.box.put(texts.length === 0 ? [AskAI.labeled({ text: CONTINUE, imgs: [], from: "UniiChat" })] : texts, say?.imgs ?? []);
+    const texts = [...lead.map((text) => AskAI.labeled({ text, imgs: [], from: config.NAME })), ...(say === null ? [] : [say.text])];
+    code.box.put(texts.length === 0 ? [AskAI.labeled({ text: CONTINUE, imgs: [], from: config.NAME })] : texts, say?.imgs ?? []);
   }
 
   export function died_before_saying(err: unknown, said: boolean, signal: AbortSignal): boolean {

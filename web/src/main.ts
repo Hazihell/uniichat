@@ -1,3 +1,4 @@
+import { NAME, name_text } from "../../Name.ts";
 import { err_why } from "../../Err.ts";
 import * as Import from "../../Import.ts";
 import { get, text_of } from "../../Json.ts";
@@ -27,9 +28,9 @@ const ME_WAIT = 4000;
 
 const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
 
-const SCENES = `
+const SCENES = name_text(`
   <div class="scene"><p>Your entire life.</p><p>One single chat.</p></div>
-  <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`;
+  <div class="scene"><i class="mark"></i><h1>UniiChat</h1></div>`, Html.esc(NAME));
 
 const v = View.view_new();
 
@@ -102,7 +103,7 @@ async function boot(): Promise<void> {
     history.back();
   }
   if (await boot_me() === null) {
-    solo("Sign in", "This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.");
+    solo("Sign in", name_text("This UniiChat server is private. On the computer it runs on, run <code>unii serve link</code> and open the link it prints here.", Html.esc(NAME)));
     return;
   }
   chat();
@@ -144,7 +145,7 @@ async function boot_me(): Promise<unknown> {
       return got;
     }
     if (k === 0) {
-      toast("Can't reach UniiChat. Reconnecting…", true);
+      toast(name_text("Can't reach UniiChat. Reconnecting…"), true);
     }
     await new Promise((ok) => setTimeout(ok, View.RETRY));
   }
@@ -328,7 +329,7 @@ function upload_answer(xhr: XMLHttpRequest): { name: string } | { error: string 
   if (typeof out === "object" && out !== null && "name" in out && typeof out.name === "string") {
     return { name: out.name };
   }
-  const why = typeof out === "object" && out !== null && "error" in out && typeof out.error === "string" ? out.error : xhr.status === 0 ? "Can't reach UniiChat." : "HTTP " + xhr.status;
+  const why = typeof out === "object" && out !== null && "error" in out && typeof out.error === "string" ? out.error : xhr.status === 0 ? name_text("Can't reach UniiChat.") : "HTTP " + xhr.status;
   return { error: "Could not upload: " + why };
 }
 
@@ -525,7 +526,7 @@ async function mic(): Promise<void> {
   }
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
   if (stream === null) {
-    toast("UniiChat can't use the microphone.");
+    toast(name_text("UniiChat can't use the microphone."));
     return;
   }
   const mimeType = ["audio/webm", "audio/mp4"].find((type) => MediaRecorder.isTypeSupported(type));
@@ -706,7 +707,7 @@ function importer(): void {
     import_draw("");
   };
   $("#import").onclick = (ev) => (ev.target as HTMLElement).closest(".skip") && $("#import").hidePopover();
-  $("#import .prog .sub").textContent = Import.MIDWAY;
+  $("#import .prog .sub").textContent = name_text(Import.MIDWAY);
   $("#import .flow").onclick = import_flow;
   $("#import").ontoggle = (ev) => {
     if (ev.newState === "closed") {
@@ -819,7 +820,7 @@ function import_bar(): boolean {
   const going = ["send", "run", "seen", "done"].includes(IMPORT.step);
   const part  = run === null ? Number(done) : run.done / Math.max(1, run.total);
   const why   = Boolean(run?.why);
-  const said  = run !== null ? View.progress_show(run) : done ? Import.DONE : IMPORT.step === "send" ? "Sending…" : "Starting…";
+  const said  = run !== null ? View.progress_show(run) : done ? name_text(Import.DONE) : IMPORT.step === "send" ? "Sending…" : "Starting…";
   $("#import .start").hidden = IMPORT.step !== "start";
   $("#import form").hidden = going || IMPORT.step === "start";
   $("#import .prog").hidden = !going;
@@ -846,7 +847,7 @@ function import_draw(status: string): void {
   const msgs     = plan.msgs;
   const left     = reads.reduce((n, read) => n + read.moved, 0);
   const moved    = left === 0 ? "" : " (" + left + (left === 1 ? " file" : " files") + " changed while read: choose the folder again to add them)";
-  const found    = sessions.length === 0 ? "" : plan.first === "" ? Import.OLD : Import.import_count(msgs, "new ");
+  const found    = sessions.length === 0 ? "" : plan.first === "" ? name_text(Import.OLD) : Import.import_count(msgs, "new ");
   const day = (at: string | number) => new Date(at).getUTCDate() + " " + new Date(at).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
   BACK.min = String(Math.floor(Date.parse(plan.first || new Date().toISOString()) / 864e5));
   BACK.max = String(Math.floor(Date.now() / 864e5));

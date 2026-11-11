@@ -1,3 +1,4 @@
+import { name_text } from "./Name.ts";
 import * as child from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -209,7 +210,7 @@ function term_back(t: Term, sent: View.Sent): void {
 function term_went(t: Term, was: View.Page | null): void {
   t.scr.off = t.scr.tty && !View.view_typing(t.v);
   if (t.v.page !== was) {
-    term_rows(t, t.v.page === null ? [View.Cap(View.MAIN)] : [], false);
+    term_rows(t, t.v.page === null ? [View.Cap(t.v.name ?? "Connecting…")] : [], false);
     term_show(t);
   }
 }
@@ -240,7 +241,7 @@ function term_enter(t: Term): void {
     return;
   }
   if (!View.view_typing(t.v)) {
-    term_note(t, "Messages go to UniiChat: Tab or /tab goes back.");
+    term_note(t, name_text("Messages go to UniiChat: Tab or /tab goes back."));
   } else if (term_act(t, { $: "Send", text, images: t.imgs }).length > 0) {
     t.imgs = [];
     return;
@@ -282,7 +283,7 @@ function term_help(t: Term): void {
   const how   = (c: Cmd) => [c[0], c[1]].filter((x) => x !== "").join(", ");
   const left  = Math.max(...term_commands().map((c) => Paint.text_width(how(c)))) + 2;
   const right = Math.max(20, term_inner() - left);
-  const row   = (c: Cmd) => Paint.runs_wrap([Paint.Run(c[2])], right, false).map((l, k) => [Paint.Run((k === 0 ? how(c) : "").padEnd(left)), ...l]);
+  const row   = (c: Cmd) => Paint.runs_wrap([Paint.Run(name_text(c[2]))], right, false).map((l, k) => [Paint.Run((k === 0 ? how(c) : "").padEnd(left)), ...l]);
   const bold  = { ...Paint.INK, b: true };
   const group = ([name, cmds]: [string, Cmd[]]) => [[Paint.Run(name, bold)], ...cmds.flatMap(row)];
   const edit  = Paint.runs_wrap([Paint.Run(Screen.EDITING)], term_inner(), false);
@@ -443,7 +444,7 @@ async function term_import(t: Term, arg: string): Promise<void> {
     return;
   }
   const sessions = read.flat().filter((s) => apps.length === 0 || apps.includes(s.app));
-  const done  = await term_get(t, "/api/imported", "read what Unii has");
+  const done  = await term_get(t, "/api/imported", name_text("read what Unii has"));
   if (done === null) {
     return;
   }
@@ -453,7 +454,7 @@ async function term_import(t: Term, arg: string): Promise<void> {
   const plan  = Import.import_plan(sessions, want, old);
   const found = "Found " + Import.import_count(plan.msgs, "new ") + ". ";
   if (plan.msgs === 0) {
-    term_note(t, plan.first === "" ? Import.OLD : found + HOW);
+    term_note(t, plan.first === "" ? name_text(Import.OLD) : found + HOW);
     return;
   }
   if (!words.includes("go")) {
@@ -726,7 +727,7 @@ function term_paint(t: Term): void {
   const iw    = term_inner();
   const room  = (process.stdout.rows || 24) - TOP_ROW_KEPT_FREE;
   const off   = t.scr.off;
-  const input = off ? null : Screen.screen_input(t.scr, iw, room - 3, View.HINT + " · /help");
+  const input = off ? null : Screen.screen_input(t.scr, iw, room - 3, (t.v.name === undefined ? "Message" : View.HINT) + " · /help");
   const under = off && t.v.up ? [] : [Paint.rule_text(t.v.up ? "" : "offline", iw)];
   const own   = term_inset([Paint.rule_line(t.v, iw), ...(input?.lines ?? []), ...under, Paint.tabs_line(t.v, iw)]);
   const rest  = View.view_stream(t.v).map((l) => ({ kind: l.kind, text: l.text.slice(t.flow.get(l) ?? 0) }));

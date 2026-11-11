@@ -1,3 +1,4 @@
+import { NAME, name_set } from "./Name.ts";
 import type { Again, Kind, Parked, Vendor } from "./AskAI.ts";
 import * as Call from "./Call.ts";
 import * as Md from "./Md.ts";
@@ -71,6 +72,7 @@ type ChatSet = {
 };
 
 type ServerSays = {
+  name?     : string;
   build?    : string;
   site?     : string;
 };
@@ -180,7 +182,7 @@ export type Choice = { text: string; to: string; move: Move; here: boolean; vend
 
 export type Prompts = Record<"prompt" | "compact", { text: string; def: string }>;
 
-export const MAIN = "UniiChat";
+export let MAIN = NAME;
 
 export const TURN = "Unii's turn";
 
@@ -198,7 +200,7 @@ export const USE_PING = 20000;
 
 export const FRAME = 2 ** 22;
 
-export const HINT = "Message UniiChat";
+export let HINT = "Message " + NAME;
 
 export const ASKS = "Asks first";
 
@@ -354,6 +356,11 @@ export function view_hear(v: View, msg: Server): Client[] {
     case "state": {
       const { $, ...state } = msg;
       Object.assign(v, state);
+      if (state.name !== undefined) {
+        name_set(state.name);
+        MAIN = state.name;
+        HINT = "Message " + state.name;
+      }
       for (const page of v.pages.values()) {
         page.pick = v.runs[page.name] ?? page.pick;
       }
@@ -575,7 +582,7 @@ export function view_tabs(v: View): Tab[] {
   const names = at === null || v.agents.includes(at) ? v.agents : [...v.agents, at];
   return [null, ...names].map((name) => {
     const here = name === at;
-    const text = (here ? GLYPH.here : GLYPH.tab) + " " + (name ?? MAIN);
+    const text = (here ? GLYPH.here : GLYPH.tab) + " " + (name ?? v.name ?? "Connecting…");
     return { name, here, text };
   });
 }

@@ -1,3 +1,4 @@
+import { NAME, name_text } from "../../Name.ts";
 import type { Vendor } from "../../AskAI.ts";
 import * as Call from "../../Call.ts";
 import * as Md from "../../Md.ts";
@@ -85,7 +86,7 @@ function row_make(row: View.Row): string {
     case "Ask": {
       const who = row.who === "" ? "" : `<span class="by">${esc(row.who)}</span>`;
       const head = `<p class="what"><span class="tag">${View.ASKS}</span>${esc(row.ask.what)}${who}</p>`;
-      const note = `<input class="note" maxlength="2000" placeholder="Note for Unii (optional)" aria-label="Note for Unii" autocomplete="off" spellcheck="true">`;
+      const note = name_text(`<input class="note" maxlength="2000" placeholder="Note for Unii (optional)" aria-label="Note for Unii" autocomplete="off" spellcheck="true">`, esc(NAME));
       const acts = `<div class="acts">${note}<button class="chip deny" data-ask="${esc(row.ask.id)}" data-ok="false">Deny</button><button class="chip go" data-ask="${esc(row.ask.id)}" data-ok="true">Approve</button></div>`;
       return `<div class="ask" role="group" aria-label="${esc(View.ASKS + ": " + row.ask.what)}">${head}<div class="msg tool">${call_html(row.call)}</div>${acts}</div>`;
     }
@@ -112,8 +113,8 @@ function images_html(names: string[]): string {
 }
 
 const MODES: Array<[string, string]> = [
-  ["standard", "Each message is summarized for Unii's memory. Cheapest, good for long working sessions."],
-  ["conversation", "Messages stay word-for-word in Unii's view until you switch back. Use it for discussions. It costs more per turn."],
+  ["standard", name_text("Each message is summarized for Unii's memory. Cheapest, good for long working sessions.", esc(NAME))],
+  ["conversation", name_text("Messages stay word-for-word in Unii's view until you switch back. Use it for discussions. It costs more per turn.", esc(NAME))],
 ];
 
 export function pick_html(fold: string | null, on: boolean, knobs: View.Knob[], talk?: View.Talk | null): string[] {
@@ -175,7 +176,7 @@ export function account_html(prompts: View.Prompts | null, notify: Notify | null
     item("Export memory", "The chat and its summaries, in one file.", `<a class="chip" href="/export">Download</a>`),
   ];
   const unread  = item("Could not read the prompts.", "", `<button class="chip retry">Try again</button>`);
-  const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, "The user prompt: Unii's system prompt in every turn; its subagents get it too once you change it. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.")
+  const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, name_text("The user prompt: Unii's system prompt in every turn; its subagents get it too once you change it. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.", NAME))
     + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
   const mcp     = section_html("MCP servers", `<div class="mcp"></div>`);
   return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
@@ -188,8 +189,8 @@ function prompt_html(name: string, text: string, note: string): string {
 
 function notify_html(notify: Notify): string {
   const note = {
-    off     : "Replies on this device, when UniiChat isn't open.",
-    on      : "Replies on this device, when UniiChat isn't open.",
+    off     : name_text("Replies on this device, when UniiChat isn't open.", esc(NAME)),
+    on      : name_text("Replies on this device, when UniiChat isn't open.", esc(NAME)),
     blocked : "Blocked in this browser's settings for this site.",
     home    : "On iPhone and iPad: Share, then Add to Home Screen, and open it from there.",
   }[notify];
@@ -198,6 +199,7 @@ function notify_html(notify: Notify): string {
 }
 
 const SETTING: Record<string, [string, string]> = {
+  name      : ["Name", "The assistant and app name. Applies after a server restart."],
   vendors   : ["Vendors", "Whose models the server offers."],
   models    : ["Models", "The models offered, of those vendors."],
   pick      : ["Default model", "What a chat runs on until it picks another."],
@@ -221,7 +223,7 @@ export const PICKS = ["pick", "compactor", "agents"];
 
 const GROUPS: Array<[string, string[]]> = [
   ["Models", ["vendors", "models", "pick", "compactor", "compactor_context", "agents"]],
-  ["Server", ["site", "apple", "apns"]],
+  ["Server", ["name", "site", "apple", "apns"]],
 ];
 
 export function settings_html(page: Page): string {
@@ -237,7 +239,7 @@ export function settings_html(page: Page): string {
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
   const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
   const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
-  const ask = section_html("Ask first", `<p class="sub">Unii waits for your yes before a tool call that matches a rule: a card in the chat, and a notification on phones with notifications on. A rule names tools (<code>*</code> for any characters, <code>!</code> to leave one out; device MCP tools are named <code>device_server__tool</code>) and, if any, a regular expression its arguments must match, in which <code>${esc(SCRATCH)}</code> is the device's scratch folder.</p><div class="set rules" data-key="ask"><div class="field"></div><p class="err"></p></div>`);
+  const ask = section_html("Ask first", `<p class="sub">${esc(NAME)} waits for your yes before a tool call that matches a rule: a card in the chat, and a notification on phones with notifications on. A rule names tools (<code>*</code> for any characters, <code>!</code> to leave one out; device MCP tools are named <code>device_server__tool</code>) and, if any, a regular expression its arguments must match, in which <code>${esc(SCRATCH)}</code> is the device's scratch folder.</p><div class="set rules" data-key="ask"><div class="field"></div><p class="err"></p></div>`);
   return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + ask + keys + group(GROUPS[1]) + save + `</form>`;
 }
 
@@ -445,7 +447,9 @@ function spans_html(spans: Md.Span[]): string {
 function span_html(s: Md.Span): string {
   switch (s.$) {
     case "Text": {
-      return esc(s.x).replaceAll("UniiChat", `<span class="brand">UniiChat</span>`);
+      const pattern = NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const words = new RegExp("(?<![\\p{L}\\p{N}_])(" + pattern + ")(?![\\p{L}\\p{N}_])", "gu");
+      return s.x.split(words).map((part, i) => i % 2 === 0 ? esc(part) : `<span class="brand">${esc(part)}</span>`).join("");
     }
     case "Code": {
       return `<code>${esc(s.x)}</code>`;

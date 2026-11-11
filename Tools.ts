@@ -1,3 +1,4 @@
+import { name_text } from "./Name.ts";
 import type { Ask, Block, Kind, Say } from "./AskAI.ts";
 import type { Out } from "./Agent.ts";
 import { report_text } from "./Call.ts";
@@ -16,7 +17,7 @@ import { EFFORTS, Pick } from "./Pick.ts";
 import { Run, type CallHooks, type Heard, type InboxHooks, type LoopHooks } from "./Run.ts";
 import type { Msg } from "./Server.ts";
 import * as Timer from "./Timer.ts";
-import { PING, limit_show, type Pending } from "./View.ts";
+import { PING, TURN, limit_show, type Pending } from "./View.ts";
 import { err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
 
@@ -93,7 +94,7 @@ export const PROMPTS = {
   compact : { def: COMPACT_PROMPT.trim(), file: config.DIR + "/compact.md" },
 };
 
-const SUB_HEAD = `You are a subagent of Unii, an AI agent that works for one user in a
+const SUB_HEAD = name_text(`You are a subagent of Unii, an AI agent that works for one user in a
 single chat that never ends. Unii gave you a task. Do it yourself, with
 your tools, following the user's instructions at the end of this
 prompt: they say who the user is, how their files are organized and how
@@ -103,9 +104,9 @@ Your first message holds the view below, then your chat with Unii so far,
 its lines as "i|kind: text": what you are (note), Unii's messages to you (user: your task, then all Unii told you), and all you did (unii, tool, echo). The view shows you what Unii knows: what the user wants,
 decided and taught. Use it as context only, and do what your task says,
 not what the user's last message says, since Unii may have given you
-just part of the work. Your final reply is your report to Unii. A message Unii sends while you work reaches you right after your current tool calls, as "A new message from Unii came in while you were working:" (after a usage limit's reset, UniiChat's "A new message from UniiChat:" tells you to go on); your report answers the last. A shell command that outlasts its call reports back as "A new message from a job:", starting "[Job id]".`;
+just part of the work. Your final reply is your report to Unii. A message Unii sends while you work reaches you right after your current tool calls, as "A new message from Unii came in while you were working:" (after a usage limit's reset, UniiChat's "A new message from UniiChat:" tells you to go on); your report answers the last. A shell command that outlasts its call reports back as "A new message from a job:", starting "[Job id]".`, config.NAME);
 
-const VIEW_DOC = `The view: the whole chat between Unii and the user, oldest first, inside
+const VIEW_DOC = name_text(`The view: the whole chat between Unii and the user, oldest first, inside
 <chat> tags, as one-line summaries. Each line is
 
   id+n|text   the n messages from id on, summarized (newlines shown as spaces)
@@ -126,7 +127,7 @@ only mentions something you need, such as what your last reply said, a
 decision, a past attempt or where a file is, before you act, guess or
 ask. date(id) gives the date and time of message id. zoom("Name") gives
 an agent's whole chat. search(query) finds text anywhere in the chat, even
-when the view has forgotten it; then zoom each matching message id.`;
+when the view has forgotten it; then zoom each matching message id.`, config.NAME);
 
 const SUB_NOTE   = "subagent";
 const SUB_ON     = " on ";
@@ -161,7 +162,7 @@ const LOOK = 3000;
 const FULL = "context window full; start a fresh agent with a shorter task";
 
 const SUB = SUB_HEAD + "\n\n" + VIEW_DOC + "\n\n" + DEVICES;
-const AGENT_PROMPT = "Unii's own prompt follows, for the user's instructions in it. Where it speaks to Unii, it speaks of the agent you work for, not of you.";
+const AGENT_PROMPT = name_text("Unii's own prompt follows, for the user's instructions in it. Where it speaks to Unii, it speaks of the agent you work for, not of you.", config.NAME);
 
 const OWN: Spec[] = [
   spec("zoom", "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. With an agent's name as id, give that agent's whole chat. A long text comes in pages from character at, saying where to go on.", { id: { type: ["integer", "string"] }, n: INT, at: INT }, ["id"]),
@@ -215,7 +216,7 @@ export namespace Tools {
   }
 
   export function prompt(which: keyof typeof PROMPTS): string {
-    return Memory.file_text(PROMPTS[which].file) || PROMPTS[which].def;
+    return name_text(Memory.file_text(PROMPTS[which].file) || PROMPTS[which].def, config.NAME);
   }
 
   export function devices(tools: Tools): Block {
@@ -782,7 +783,7 @@ export namespace Tools {
   }
 
   export function restarted(work: string[]): string {
-    return "The server restarted, cutting " + work.join(", ") + "; nothing was lost: go on.";
+    return "The server restarted, cutting " + work.map((name) => name === TURN ? name_text(name, config.NAME) : name).join(", ") + "; nothing was lost: go on.";
   }
 
   export async function tell(tools: Tools, name: string, message: string, before: string[] = []): Promise<string> {
@@ -849,7 +850,7 @@ export namespace Tools {
     const log = tools.log;
     return {
       log    : (run, say) => log.push(run, "user", say.text, true),
-      say    : (say) => ({ ...say, from: say.text.startsWith(JOB) ? "a job" : "Unii" }),
+      say    : (say) => ({ ...say, from: say.text.startsWith(JOB) ? "a job" : name_text("Unii", config.NAME) }),
       queued : (run) => {
         Tools.queued(tools, run);
         log.change();
@@ -907,7 +908,7 @@ export namespace Tools {
     const log = { text: Memory.agent_show(tools.mem, agent.name), mark: true };
     const server = Tools.at(tools, agent.name);
     const run = Pick.ask(Tools.pick(tools, agent));
-    const own = Memory.file_text(PROMPTS.prompt.file);
+    const own = name_text(Memory.file_text(PROMPTS.prompt.file), config.NAME);
     const system = own === "" ? SUB : SUB + "\n\n" + AGENT_PROMPT + "\n\n" + own;
     const blocks = [...agent.view, Tools.devices(tools), Tools.skills(tools), log];
     return { ...run, system, blocks, searches: SEARCHES, server, agent: true, who: agent.name };
@@ -957,7 +958,7 @@ export namespace Tools {
       const live = run.live.at(-1);
       const last = [...run.calls.values()].at(-1)?.text ?? (live && live.kind + ": " + live.text);
       const doing = last === undefined ? "" : " It was last at " + last.replace(/\s+/g, " ").slice(0, 300);
-      agent.why = "Stopped by Unii" + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, ".")) + doing;
+      agent.why = name_text("Stopped by Unii", config.NAME) + (why.trim() === "" ? "." : ": " + why.trim().replace(/\.?$/, ".")) + doing;
       Tools.stop(tools, name);
       ended = await Promise.race([run.going.then(() => true, () => true), Bun.sleep(HALT).then(() => false)]);
     }

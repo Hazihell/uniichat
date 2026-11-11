@@ -42,6 +42,7 @@ export const FILE_PATH = DIR + "/config.json";
 export const KEYS_PATH = DIR + "/keys.json";
 
 export const SETTINGS: Setting[] = [
+  { key: "name",      def: "UniiChat",                           apply: "restart", server_only: null },
   { key: "vendors",   def: "claude-api",                        apply: "now",     server_only: null },
   { key: "models",    def: LABELS.join(),                       apply: "now",     server_only: null },
   { key: "pick",      def: "claude-api:sonnet-5.5:medium:slow", apply: "now",     server_only: null },
@@ -95,6 +96,8 @@ export const RELOADED = new Set<() => void>();
 const MADE = config_make(FILE);
 
 export const STARTED: Record<string, string> = Object.fromEntries(SETTINGS.map((s) => [s.key, config_value(FILE, s.key)]));
+
+export const NAME    = config_name(config_value(FILE, "name"));
 
 export const SITE    = config_value(FILE, "site").replace(/\/$/, "");
 export const OFFER: Offer = MADE.offer;
@@ -283,7 +286,15 @@ function config_json(file: string, text: string): unknown {
   }
 }
 
+function config_name(name: string): string {
+  if (name.trim() === "" || name.length > 80 || /[\x00-\x1f\x7f]/.test(name)) {
+    throw new Error("config: name needs 1 to 80 characters on one line");
+  }
+  return name.trim();
+}
+
 export function config_make(file: Record<string, unknown>): Made {
+  config_name(config_value(file, "name"));
   const offer: Offer = {
     vendors : config_vendors(config_value(file, "vendors")),
     models  : config_value(file, "models").split(",").map((m) => m.trim()),

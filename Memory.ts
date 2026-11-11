@@ -1,3 +1,4 @@
+import { name_text } from "./Name.ts";
 import * as fs from "node:fs";
 import { AskAI, type Again, type Ask, type Block, type Call, type End as Answered, type Event, type Img, type Kind, type Say } from "./AskAI.ts";
 import { clip_page, clip_pages } from "./Clip.ts";
@@ -999,7 +1000,7 @@ ${Memory.cut(line)}| ← LIMIT`;
       return text === null ? [] : [Memory.line(part, text) + "\n"];
     });
     const said = Array.from({ length: Math.max(0, end - talk) }, (_, k) => Memory.talk_line(mem, talk + k) + "\n");
-    return [...lines, TALKING.replace("{id}", String(talk)) + "\n", ...said];
+    return [...lines, name_text(TALKING.replace("{id}", String(talk)), config.NAME) + "\n", ...said];
   }
 
   export function upto(mem: Memory, part: Part, end: number): Part[] {

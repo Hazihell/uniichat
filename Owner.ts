@@ -1,3 +1,4 @@
+import { name_html } from "./Name.ts";
 import { Database } from "bun:sqlite";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -165,7 +166,7 @@ export namespace Owner {
           return owner ? Owner.page_confirm(t, link.what, "") : Owner.page("Sign in this browser first", "Run <code>unii serve link</code> on the server, open the link it prints, then open this link again.");
         }
         // a button, so a chat app's preview of the link doesn't use it up
-        return Owner.page("Sign in this browser", `Sign in to this unii server as its owner.</p><form method="post" action="/auth"><input type="hidden" name="t" value="${Owner.safe(t)}"><button type="submit" autofocus>Sign in</button></form><p>`);
+        return Owner.page("Sign in this browser", `Sign in to this ${name_html(config.NAME)} server as its owner.</p><form method="post" action="/auth"><input type="hidden" name="t" value="${Owner.safe(t)}"><button type="submit" autofocus>Sign in</button></form><p>`);
       }
       case "/api/wait": {
         if (owner) {
@@ -283,7 +284,7 @@ export namespace Owner {
   }
 
   export function page(title: string, body: string): Response {
-    const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · UniiChat</title><link rel="stylesheet" href="/style.css"></head><body class="solo"><main><h1>${title}</h1><p class="sub">${body}</p></main></body></html>`;
+    const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · ${name_html(config.NAME)}</title><link rel="stylesheet" href="/style.css"></head><body class="solo"><main><h1>${title}</h1><p class="sub">${body}</p></main></body></html>`;
     return new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } });
   }
 

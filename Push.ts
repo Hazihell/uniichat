@@ -83,7 +83,7 @@ export namespace Push {
       return;
     }
         const phones = db.query("select token from pushes").all() as { token: string }[];
-    const body = JSON.stringify({ aps: { alert: { body: Push.gist(text) }, sound: "default" } });
+    const body = JSON.stringify({ aps: { alert: { title: config.NAME, body: Push.gist(text) }, sound: "default" } });
     for (const { token } of phones) {
       const link = Push.apns();
       const head = { ":method": "POST", ":path": "/3/device/" + token, authorization: "bearer " + Push.apns_jwt(), "apns-topic": config.APPLE.replace(/^[^.]*\./, ""), "apns-push-type": "alert" };
@@ -109,7 +109,7 @@ export namespace Push {
 
   export function browsers(db: Database, text: string, tag: string): void {
         const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
-    const body = JSON.stringify({ text: Push.gist(text), tag });
+    const body = JSON.stringify({ text: Push.gist(text), tag, title: config.NAME });
     for (const sub of subs) {
       void Push.send(sub, body).then((status) => {
         if (status === 404 || status === 410) {
