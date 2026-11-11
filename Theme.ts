@@ -20,6 +20,7 @@ export const FILLED: Kind[] = ["tool"];
 export const FRAMED: Kind[] = ["user", "work"];
 
 const TOOL: Record<string, string> = {
+  search: "🔎",
   zoom       : "🔍",
   date       : "📅",
   shell      : "⌨️",

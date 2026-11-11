@@ -9,6 +9,7 @@ import { Limit } from "./Limit.ts";
 import { INT, JOB, STR, TOOLS, spec, type Bg, type Job, type Skill, type Spec } from "./Machine.ts";
 import { Mcp, type Server, type Servers } from "./Mcp.ts";
 import { Memory } from "./Memory.ts";
+import { Search } from "./Search.ts";
 import PROMPT from "./prompt.txt" with { type: "text" };
 import COMPACT_PROMPT from "./compact.txt" with { type: "text" };
 import { EFFORTS, Pick } from "./Pick.ts";
@@ -124,7 +125,8 @@ the images its "[image <file>]" lines name. Zoom whenever a summary
 only mentions something you need, such as what your last reply said, a
 decision, a past attempt or where a file is, before you act, guess or
 ask. date(id) gives the date and time of message id. zoom("Name") gives
-an agent's whole chat.`;
+an agent's whole chat. search(query) finds text anywhere in the chat, even
+when the view has forgotten it; then zoom each matching message id.`;
 
 const SUB_NOTE   = "subagent";
 const SUB_ON     = " on ";
@@ -163,6 +165,7 @@ const AGENT_PROMPT = "Unii's own prompt follows, for the user's instructions in 
 
 const OWN: Spec[] = [
   spec("zoom", "Open the line id+n of the view into the two lines of n/2 under it; n = 1 gives the message whole. With an agent's name as id, give that agent's whole chat. A long text comes in pages from character at, saying where to go on.", { id: { type: ["integer", "string"] }, n: INT, at: INT }, ["id"]),
+  spec("search", "Search every message in this chat for a literal, case-insensitive word or phrase (1–500 characters), however old. Returns oldest first: message id, UTC date, kind and a short matching excerpt; zoom(id, 1) opens the full message. since/until are inclusive YYYY-MM-DD dates. limit defaults to 20, at most 100. after continues after a message id. No regular expressions.", { query: STR, since: STR, until: STR, limit: INT, after: INT }, ["query"]),
   spec("date", "The date and time of message id.", { id: INT }, ["id"]),
 ];
 const BOSS: Spec[] = [
@@ -340,7 +343,7 @@ export namespace Tools {
   export async function gated(tools: Tools, who: string, name: string, args: Record<string, unknown>, device: string | null, signal: AbortSignal, run: () => Promise<Out>): Promise<Out> {
     const on = device ?? (typeof args.device === "string" ? args.device : null);
     const link = on === null ? undefined : [...(tools.devices.get(on)?.terms.values() ?? [])][0];
-    const rule = Rules.match(config.ASK, name, args, link?.scratch ?? null);
+    const rule = name === "search" ? null : Rules.match(config.ASK, name, args, link?.scratch ?? null);
     if (rule === null) {
       return await run();
     }
@@ -422,6 +425,20 @@ export namespace Tools {
       }
       case "date": {
         return { text: Memory.date(mem, Number(args.id)), fail: false };
+      }
+      case "search": {
+        try {
+          const found = await Search.find(mem, text_of(args.query, ""), {
+            since: args.since === undefined ? undefined : text_of(args.since, ""),
+            until: args.until === undefined ? undefined : text_of(args.until, ""),
+            limit: args.limit === undefined ? undefined : Number(args.limit),
+            after: args.after === undefined ? undefined : Number(args.after),
+          }, signal);
+          const lines = found.hits.map((hit) => "#" + hit.id + " " + hit.date.slice(0, 10) + " " + hit.kind + ": " + hit.text);
+          return { text: lines.length === 0 ? "Nothing in this chat matches." : lines.join("\n") + (found.more ? "\n(more matched: continue with after=" + found.hits.at(-1)?.id + ", or narrow the dates.)" : ""), fail: false };
+        } catch (err) {
+          return { text: err_why(err), fail: true };
+        }
       }
       case "spawn": {
         const tasks = Tools.spawns(args);
