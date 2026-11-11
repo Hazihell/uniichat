@@ -1,6 +1,7 @@
 import { err_why } from "../../Err.ts";
 import * as Import from "../../Import.ts";
 import { get, text_of } from "../../Json.ts";
+import { Rules, type Rule } from "../../Rules.ts";
 import type { Page, Row } from "../../Settings.ts";
 import { theme_css } from "../../Theme.ts";
 import * as View from "../../View.ts";
@@ -343,7 +344,7 @@ function act(a: View.Act): void {
 
 function click(ev: MouseEvent): void {
   const target = ev.target as HTMLElement;
-  const el = target.closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], .choices > button");
+  const el = target.closest<HTMLElement>("[data-act], [data-copy], [data-go], [data-knob], [data-ask], .choices > button");
   const sel = getSelection();
   const pic = Viewer.viewer_pic(target);
   if (pic !== null && !(ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) && (sel === null || sel.isCollapsed)) {
@@ -366,6 +367,10 @@ function click(ev: MouseEvent): void {
     place(el);
     return;
   }
+  if (el.dataset.ask !== undefined) {
+    void answer(el);
+    return;
+  }
   el.closest<HTMLElement>(".choices")?.hidePopover();
   const { act: a, copy: text, go: path } = el.dataset;
   const menu = el.closest("#menu") !== null;
@@ -381,6 +386,18 @@ function click(ev: MouseEvent): void {
   }
   if (text !== undefined) {
     navigator.clipboard.writeText(text).then(() => copied(el), () => toast("Could not copy."));
+  }
+}
+
+async function answer(button: HTMLElement): Promise<void> {
+  const card = must(button.closest<HTMLElement>(".ask"), "the answer's card");
+  const note = card.querySelector<HTMLInputElement>(".note")?.value.trim() ?? "";
+  const buttons = [...card.querySelectorAll<HTMLButtonElement>("button")];
+  buttons.forEach((b) => (b.disabled = true));
+  const out = await View.post("/api/approve", { id: button.dataset.ask, ok: button.dataset.ok === "true", note });
+  if (!out.ok) {
+    buttons.forEach((b) => (b.disabled = false));
+    toast(text_of(out.error, "Could not send the answer."));
   }
 }
 
@@ -1316,8 +1333,39 @@ function settings_draw(page: Page): void {
   };
   form.onsubmit = (ev) => {
     ev.preventDefault();
-    void settings_save(form, page, unset, listed, profs);
+    void settings_save(form, page, unset, listed, profs, rules);
   };
+  const rules = page.ask.map((r) => ({ ...r }));
+  const rbox = form.querySelector<HTMLElement>(".rules .field");
+  const rules_draw = (focus?: string) => {
+    if (rbox !== null) {
+      rbox.innerHTML = Html.rules_html(rules, JSON.stringify(rules) === JSON.stringify(page.built));
+      (focus === undefined ? null : rbox.querySelector<HTMLElement>(focus) ?? rbox.querySelector<HTMLElement>(".rnew"))?.focus();
+      must(rbox.closest(".set")?.querySelector(".err"), "the rules' err").textContent = "";
+    }
+  };
+  rbox?.addEventListener("click", (ev) => {
+    const b = (ev.target as HTMLElement).closest<HTMLButtonElement>("button");
+    if (b?.classList.contains("rnew")) {
+      rules.push({ what: "", tools: "", args: "" });
+      rules_draw(`.rwhat[data-i="${rules.length - 1}"]`);
+    } else if (b?.classList.contains("rdel")) {
+      rules.splice(Number(b.dataset.i), 1);
+      rules_draw(".rnew");
+    } else if (b?.classList.contains("rback")) {
+      rules.splice(0, rules.length, ...page.built.map((r) => ({ ...r })));
+      rules_draw(".rnew");
+    }
+  });
+  rbox?.addEventListener("input", (ev) => {
+    const el = ev.target as HTMLInputElement;
+    const r = rules[Number(el.dataset.i)] as Record<string, string> | undefined;
+    const field = el.className.replace(/^r/, "");
+    if (r !== undefined && field in r) {
+      r[field] = el.value;
+    }
+  });
+  rules_draw();
   const profs_draw = (focus?: string) => {
     if (box !== null) {
       box.innerHTML = Html.profiles_html(profs, Html.offered(listed("vendors"), listed("models")));
@@ -1414,7 +1462,7 @@ function settings_draw(page: Page): void {
   picks();
 }
 
-async function settings_save(form: HTMLFormElement, page: Page, unset: Set<string>, listed: (key: string) => string[], profs: Array<[string, string[]]>): Promise<void> {
+async function settings_save(form: HTMLFormElement, page: Page, unset: Set<string>, listed: (key: string) => string[], profs: Array<[string, string[]]>, rules: Rule[]): Promise<void> {
   const set: Record<string, string | null> = {};
   const keys: Record<string, string | null> = {};
   for (const r of page.settings) {
@@ -1453,7 +1501,15 @@ async function settings_save(form: HTMLFormElement, page: Page, unset: Set<strin
     const was = JSON.stringify(page.profiles);
     profiles = JSON.stringify(Object.fromEntries(now)) === was ? undefined : Object.fromEntries(now);
   }
-  if (Object.keys(set).length === 0 && Object.keys(keys).length === 0 && profiles === undefined) {
+  const read = Rules.read(rules);
+  if (typeof read === "string") {
+    const at = find(form, ".rules", HTMLElement);
+    must(at.querySelector(".err"), "the rules' err").textContent = read + ".";
+    at.scrollIntoView({ block: "center" });
+    return;
+  }
+  const ask = JSON.stringify(read) === JSON.stringify(page.ask) ? undefined : JSON.stringify(read) === JSON.stringify(page.built) ? null : read;
+  if (Object.keys(set).length === 0 && Object.keys(keys).length === 0 && profiles === undefined && ask === undefined) {
     why.textContent = "Nothing changed.";
     return;
   }
@@ -1461,7 +1517,7 @@ async function settings_save(form: HTMLFormElement, page: Page, unset: Set<strin
   go.disabled = true;
   why.textContent = "";
   RENEW.saving++;
-  const out = await View.post("/api/settings", { version: page.version, set, keys, ...(profiles === undefined ? {} : { profiles }) });
+  const out = await View.post("/api/settings", { version: page.version, set, keys, ...(profiles === undefined ? {} : { profiles }), ...(ask === undefined ? {} : { ask }) });
   RENEW.saving--;
   go.disabled = false;
   if (!out.ok) {

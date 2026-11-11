@@ -43,18 +43,21 @@ async function fresh(req, key) {
 
 self.addEventListener("push", (ev) => {
   let text = "";
+  let tag = "unii";
   try {
-    text = String(ev.data?.json().text ?? "");
+    const data = ev.data?.json();
+    text = String(data?.text ?? "");
+    tag = String(data?.tag ?? tag);
   } catch {}
-  ev.waitUntil(notify(text));
+  ev.waitUntil(notify(text, tag));
 });
 
-async function notify(text) {
+async function notify(text, tag) {
   const tabs = await self.clients.matchAll({ type: "window" });
   if (QUIET && tabs.some((tab) => tab.focused)) {
     return;
   }
-  await self.registration.showNotification("UniiChat", { body: text, icon: "/icon-192.png", tag: "unii", renotify: true });
+  await self.registration.showNotification("UniiChat", { body: text, icon: "/icon-192.png", tag, renotify: true, requireInteraction: tag !== "unii" });
 }
 
 self.addEventListener("notificationclick", (ev) => {

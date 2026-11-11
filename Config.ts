@@ -6,6 +6,7 @@ import type { Vendor } from "./AskAI.ts";
 import { err_code, err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
 import { EFFORTS, LABELS, VENDORS, Pick, type Fall, type Offer } from "./Pick.ts";
+import { Rules, type Rule } from "./Rules.ts";
 
 type ServerOnly = "runs a command";
 
@@ -20,6 +21,7 @@ type Made = {
   context   : number;
   agents    : Pick | null;
   after     : string;
+  ask       : Rule[];
 };
 
 export type McpServer = {
@@ -103,6 +105,7 @@ export let   PICK       = MADE.pick;
 export let   COMPACTOR  = MADE.compactor;
 export let   COMPACTOR_CONTEXT = MADE.context;
 export let   AGENTS     = MADE.agents;
+export let   ASK        = MADE.ask;
 
 export const APPLE      = config_value(FILE, "apple");
 export const APNS       = config_value(FILE, "apns");
@@ -294,7 +297,16 @@ export function config_make(file: Record<string, unknown>): Made {
     context   : config_context(config_value(file, "compactor_context")),
     agents    : agents ? config_run("agents", agents, offer) : null,
     after     : config_value(file, "after"),
+    ask       : config_ask(file.ask),
   };
+}
+
+function config_ask(x: unknown): Rule[] {
+  const rules = Rules.read(x);
+  if (typeof rules === "string") {
+    throw new Error("config: ask: " + rules);
+  }
+  return rules;
 }
 
 function config_context(text: string): number {
@@ -445,6 +457,7 @@ export function config_reload(): void {
   COMPACTOR_CONTEXT = made.context;
   AGENTS = made.agents;
   AFTER = made.after;
+  ASK = made.ask;
   Object.assign(KEYS, keys);
   RELOADED.forEach((f) => f());
 }

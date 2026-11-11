@@ -1,8 +1,9 @@
 // Push
 // ====
-// Each turn's last message to the owner's phones (the iOS app, by APNs)
-// and browsers (notify). Web Push (RFC 8030) with no vendor's account: the server's own VAPID
-// key pair (RFC 8292), made at its first start and kept beside its config
+// Each turn's last message, and each risky call waiting for a yes (Gate),
+// to the owner's phones (the iOS app, by APNs) and browsers (notify). Web
+// Push (RFC 8030) with no vendor's account: the server's own VAPID key
+// pair (RFC 8292), made at its first start and kept beside its config
 // (config.DIR/vapid.json; a new pair loses every browser's subscription),
 // signs each request, and each message is encrypted to its browser's
 // keys (RFC 8291: aes128gcm, RFC 8188, one record), so the push service
@@ -70,9 +71,11 @@ let KEYS: Keys | Broken | undefined;
 
 export namespace Push {
 
-  export function notify(db: Database, text: string): void {
+  // tag: a browser's notification it replaces (one per approval asked;
+  // the replies share one)
+  export function notify(db: Database, text: string, tag = "unii"): void {
     Push.phones(db, text);
-    Push.browsers(db, text);
+    Push.browsers(db, text, tag);
   }
 
   export function phones(db: Database, text: string): void {
@@ -104,9 +107,9 @@ export namespace Push {
     return text.replace(/\s+/g, " ").slice(0, GIST);
   }
 
-  export function browsers(db: Database, text: string): void {
+  export function browsers(db: Database, text: string, tag: string): void {
         const subs = db.query("select endpoint, p256dh, auth from web_pushes").all() as Sub[];
-    const body = JSON.stringify({ text: Push.gist(text) });
+    const body = JSON.stringify({ text: Push.gist(text), tag });
     for (const sub of subs) {
       void Push.send(sub, body).then((status) => {
         if (status === 404 || status === 410) {

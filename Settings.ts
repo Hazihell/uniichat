@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as config from "./Config.ts";
+import { ASK, Rules, type Rule } from "./Rules.ts";
 import { LABELS } from "./Pick.ts";
 import { write_whole } from "./Write.ts";
 import { err_code, err_why } from "./Err.ts";
@@ -19,7 +20,8 @@ export type Row = {
 
 export type Key = { name: string; env: string; from: config.From; tail: string };
 
-export type Page = { version: string; settings: Row[]; keys: Key[]; profiles: Record<string, string[]> | null; error: string | null; none: string | null };
+// ask: the rules for risky calls (Gate); built: the built-in ones, used while none are set
+export type Page = { version: string; settings: Row[]; keys: Key[]; profiles: Record<string, string[]> | null; ask: Rule[]; built: Rule[]; error: string | null; none: string | null };
 
 type Out = { status: number; body: object; saved: string[]; wrote: boolean };
 
@@ -69,7 +71,8 @@ export namespace Settings {
       return { name, env, from, tail: Settings.tail(key) };
     });
     const profiles = process.env.UNII_PROFILES !== undefined ? null : Settings.profiles(file.profiles) ?? {};
-    return { version: snap.version, settings, keys: shown, profiles, error, none: config.config_none() };
+    const ask = Rules.read(file.ask);
+    return { version: snap.version, settings, keys: shown, profiles, ask: typeof ask === "string" ? ASK : ask, built: ASK, error, none: config.config_none() };
   }
 
   export function tail(key: string): string {
@@ -99,6 +102,11 @@ export namespace Settings {
     const keys = Settings.record(get(body, "keys"));
     const given = get(body, "profiles");
     const profiles = given === undefined ? undefined : given === null ? null : Settings.profiles(given);
+    const asked = get(body, "ask");
+    const ask = asked === undefined ? undefined : asked === null ? null : Rules.read(asked);
+    if (typeof ask === "string") {
+      return refuse(400, ask + ".", "ask");
+    }
     let snap: config.Snapshot;
     try {
       snap = config.config_snapshot();
@@ -155,6 +163,11 @@ export namespace Settings {
         next.profiles = profiles;
       }
     }
+    if (ask === null) {
+      delete next.ask;
+    } else if (ask !== undefined) {
+      next.ask = ask;
+    }
     for (const [name, value] of Object.entries(keys)) {
       if (!Object.hasOwn(config.VARS, name)) {
         return refuse(400, "No key " + JSON.stringify(name) + ".");
@@ -182,7 +195,7 @@ export namespace Settings {
       if (Object.keys(keys).length > 0) {
         write_whole(config.KEYS_PATH, config.keys_text(kept), 0o600);
       }
-      if (Object.keys(set).length > 0 || profiles !== undefined) {
+      if (Object.keys(set).length > 0 || profiles !== undefined || ask !== undefined) {
         const mode = snap.file === null ? 0o600 : fs.statSync(config.FILE_PATH).mode & 0o777;
         write_whole(config.FILE_PATH, JSON.stringify(next, null, 2) + "\n", mode);
       }
@@ -191,7 +204,7 @@ export namespace Settings {
       const out = refuse(500, "The settings couldn't be saved (" + (err_code(err) ?? err_why(err).replace(/^config: /, "")) + "). Reload to see what is saved.");
       return { ...out, wrote: true };
     }
-    const saved = [...Object.keys(set), ...(profiles === undefined ? [] : ["profiles"]), ...Object.keys(keys).map((name) => "key." + name)];
+    const saved = [...Object.keys(set), ...(profiles === undefined ? [] : ["profiles"]), ...(ask === undefined ? [] : ["ask"]), ...Object.keys(keys).map((name) => "key." + name)];
     return { status: 200, body: { ...Settings.page(), saved }, saved, wrote: saved.length > 0 };
   }
 

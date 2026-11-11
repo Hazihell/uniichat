@@ -110,7 +110,7 @@ Yes, with [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/). Run `unii d
 
 **I don't trust its unlimited tool calling. Can I make it ask for permission on tool calls?**
 
-You enjoy pressing enter?
+For the risky ones, yes: sending messages as you, payments, deletes outside scratch, logins and publishing wait for your Approve or Deny in the web app, with a phone notification. Settings → Ask first lists the rules; add or remove them there.
 
 **How can I reach UniiChat from outside my home network?**
 

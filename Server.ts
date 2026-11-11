@@ -7,6 +7,7 @@ import type { ServerWebSocket } from "bun";
 import { AskAI, GO_ON, type Ask, type Call, type End, type Event, type Kind, type Parked, type Said, type Say, type Vendor } from "./AskAI.ts";
 import { clip_pages } from "./Clip.ts";
 import { Disk } from "./Disk.ts";
+import { Gate, type Asked } from "./Gate.ts";
 import { Mcp } from "./Mcp.ts";
 import * as Import from "./Import.ts";
 import * as Md from "./Md.ts";
@@ -25,7 +26,7 @@ import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
 import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
 import { JOB } from "./Machine.ts";
-import { ACTIVE, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
+import { ACTIVE, ASKS, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
 import * as config from "./Config.ts";
 import { err_code, err_stack, err_why } from "./Err.ts";
 import { get, rec, text_of } from "./Json.ts";
@@ -120,6 +121,8 @@ const QUEUED_TEXT = 4000;
 const BODIES     = ["say", "import", "voice"];
 
 const PAIR       = 200;
+
+const NOTE       = 2000;
 
 const PAGE_CSP   = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-same-origin allow-popups";
 const PAGE_BASE  = `<!doctype html><meta charset="utf-8"><base target="_blank"><style>:root { color-scheme: light dark; } body { margin: 10px 12px; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; color: #111111; background: #ffffff; } a { color: inherit; } @media (prefers-color-scheme: dark) { body { color: #e3e3e6; background: #171719; } }</style>\n`;
@@ -226,6 +229,7 @@ export namespace Chat {
       report : (text, take) => Chat.report(chat, text, take),
       change : () => Chat.change(chat),
       timed  : () => Chat.timed(chat),
+      asked  : (a) => Chat.asked(a),
     });
     Chat.keep_pick(mem.pick);
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
@@ -823,6 +827,10 @@ export namespace Chat {
     }
   }
 
+  export function asked(a: Asked): void {
+    Push.notify(Owner.open(), ASKS + ": " + a.what.toLowerCase() + ": " + Gate.line(a), "ask-" + a.id);
+  }
+
   export function after(chat: Chat): void {
     if (!config.AFTER) {
       return;
@@ -1128,7 +1136,7 @@ export namespace Chat {
         sent[run.name] = run.sent.flatMap(({ m }) => Array.from({ length: m.end - m.id }, (_, k) => m.id + k));
       }
     }
-    return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, build: BUILD, site: config.SITE };
+    return { $: "state", busy: chat.main.busy, wait: Chat.waits(chat), agents, runs, pick: chat.pick, ...config.OFFER, importing, limits, queue, sent, sums: Chat.sums(chat), again: chat.mem.again, timers, mcp, talk, asks: Gate.shown(chat.tools.gate), build: BUILD, site: config.SITE };
   }
 
   export function sums(chat: Chat): Sums | null {
@@ -1620,6 +1628,9 @@ export namespace Main {
         const out = await Chat.apply(chat, msg, "");
         return Response.json(out, { status: out.status ?? (out.error === undefined ? 200 : 400) });
       }
+      case "/api/approve": {
+        return await Main.approve(req);
+      }
       case "/api/imported": {
         return Response.json(Chat.done(chat));
       }
@@ -1853,6 +1864,22 @@ export namespace Main {
         console.error("unii: " + note);
       }
     }
+  }
+
+  export async function approve(req: Request): Promise<Response> {
+    if (req.method !== "POST") {
+      return new Response("an answer is a POST", { status: 405 });
+    }
+    if (!Owner.browser(req)) {
+      return Response.json({ error: "Approve or deny in the web app: a terminal or device can't." }, { status: 403 });
+    }
+    const body: unknown = await req.json().catch(() => null);
+    const [id, ok, note] = [get(body, "id"), get(body, "ok"), get(body, "note") ?? ""];
+    if (typeof id !== "string" || typeof ok !== "boolean" || typeof note !== "string") {
+      return Response.json({ error: "An answer is { id, ok, note }." }, { status: 400 });
+    }
+    const why = await Tools.decide(Main.chat.tools, id, ok, note.trim().slice(0, NOTE));
+    return Response.json(why === null ? {} : { error: why }, { status: why === null ? 200 : 409 });
   }
 
   export async function settings(req: Request): Promise<Response> {

@@ -5,6 +5,7 @@ import { LABELS, type Fall, type Move, Pick } from "./Pick.ts";
 import { GLYPH, WHO } from "./Theme.ts";
 import type { Timer } from "./Timer.ts";
 import type { Bg, Job } from "./Machine.ts";
+import type { Asked } from "./Gate.ts";
 import { rec } from "./Json.ts";
 
 export type Part = [number, number];
@@ -66,6 +67,7 @@ type ChatSet = {
   timers    : Timer[];
   mcp       : Plug[];
   talk      : Talk | null;
+  asks      : Asked[];
 };
 
 type ServerSays = {
@@ -168,6 +170,7 @@ export type Row =
   | { $: "Box"; id: number; n: number; text: string; rows: Row[] }
   | { $: "Msg"; id: number | null; kind: Kind; who: string; text: string; body: Md.Block[]; call: Call.Call | null; images: string[]; queued?: boolean }
   | { $: "Cap"; text: string; earlier?: true }
+  | { $: "Ask"; ask: Asked; call: Call.Call; who: string }
 
 export type Tab = { name: string | null; here: boolean; text: string };
 
@@ -196,6 +199,8 @@ export const USE_PING = 20000;
 export const FRAME = 2 ** 22;
 
 export const HINT = "Message UniiChat";
+
+export const ASKS = "Asks first";
 
 const WAIT = "compressing…";
 const SUMS = "compressing earlier messages…";
@@ -286,6 +291,7 @@ export function view_new(): View {
     timers    : [],
     mcp       : [],
     talk      : null,
+    asks      : [],
     parts     : [],
     turn      : Infinity,
     fold      : null,
@@ -516,7 +522,8 @@ export function view_tail(v: View, live = view_stream(v)): Row[] {
   const kept = said.length > 0 ? [...said, Cap(UNSENT)] : [];
   const name = v.page === null ? TURN : v.page.name;
   const queued = (v.queue[name] ?? []).flatMap((q) => entry_rows(null, q.kind, q.text).map((row) => (row.$ === "Msg" ? { ...row, queued: true } : row)));
-  const after = [...queued, ...kept, ...load];
+  const asks = v.asks.filter((a) => v.page === null || a.who === v.page.name).map((ask): Row => ({ $: "Ask", ask, call: Call.call_parse(ask.tool + " " + ask.input), who: ask.who === "main" ? "" : ask.who }));
+  const after = [...asks, ...queued, ...kept, ...load];
   const limit = v.limits[name];
   if (limit !== undefined) {
     return [...rows, Cap(limit_show(limit)), ...after];

@@ -2,6 +2,7 @@ import type { Vendor } from "../../AskAI.ts";
 import * as Call from "../../Call.ts";
 import * as Md from "../../Md.ts";
 import { EFFORTS, LABELS, Pick, VENDORS } from "../../Pick.ts";
+import { SCRATCH, type Rule } from "../../Rules.ts";
 import type { Key, Page, Row } from "../../Settings.ts";
 import * as Theme from "../../Theme.ts";
 import * as Timer from "../../Timer.ts";
@@ -23,6 +24,8 @@ const WRAP = 100;
 
 export const SHEETS = `<svg viewBox="0 0 16 16" width="15" height="15"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.5v-.2A1.8 1.8 0 0 0 8.7 1.5H4.3A1.8 1.8 0 0 0 2.5 3.3v4.4a1.8 1.8 0 0 0 1.8 1.8h.2"/></svg>`;
 export const CHECK  = `<svg viewBox="0 0 16 16" width="15" height="15"><path d="M3 8.5l3.2 3L13 4.5"/></svg>`;
+
+const DECIDED = /^(Approved|Denied) by the user: /;
 
 const MARKS: Record<Md.Line["s"], string> = { " ": "", "-": "del", "+": "add" };
 
@@ -72,10 +75,19 @@ function row_make(row: View.Row): string {
       const who = row.who === "" ? "" : ` data-who="${esc(row.who)}"`;
       const queued = row.queued === true ? " queued" : "";
       const long = cut && whole.split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / WRAP)), 0) > FOLD ? " long" : "";
-      return `<div class="msg ${row.kind}${queued}${long}"${at}${who}>${copy}${fold}${pics}</div>`;
+      const said = row.kind === "note" ? DECIDED.exec(row.text)?.[1] : undefined;
+      const decided = said === undefined ? "" : said === "Approved" ? " decided ok" : " decided no";
+      return `<div class="msg ${row.kind}${queued}${long}${decided}"${at}${who}>${copy}${fold}${pics}</div>`;
     }
     case "Cap": {
       return `<p class="cap${row.earlier === true ? " earlier" : ""}">${esc(row.text)}</p>`;
+    }
+    case "Ask": {
+      const who = row.who === "" ? "" : `<span class="by">${esc(row.who)}</span>`;
+      const head = `<p class="what"><span class="tag">${View.ASKS}</span>${esc(row.ask.what)}${who}</p>`;
+      const note = `<input class="note" maxlength="2000" placeholder="Note for Unii (optional)" aria-label="Note for Unii" autocomplete="off" spellcheck="true">`;
+      const acts = `<div class="acts">${note}<button class="chip deny" data-ask="${esc(row.ask.id)}" data-ok="false">Deny</button><button class="chip go" data-ask="${esc(row.ask.id)}" data-ok="true">Approve</button></div>`;
+      return `<div class="ask" role="group" aria-label="${esc(View.ASKS + ": " + row.ask.what)}">${head}<div class="msg tool">${call_html(row.call)}</div>${acts}</div>`;
     }
   }
 }
@@ -225,7 +237,20 @@ export function settings_html(page: Page): string {
   const save = `<div class="save"><p class="why"></p><button class="chip go"${page.error === null ? "" : " disabled"}>Save</button></div>`;
   const head = `<p class="sub">The server's settings, in config.json in its folder.</p>`;
   const profiles = page.profiles === null ? "" : section_html("Profiles", `<p class="sub">Ranked models: a chat on a profile runs on the first and falls back to the next when one is out.</p><div class="set profiles" data-key="profiles"><div class="field"></div><p class="err"></p></div>`);
-  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + keys + group(GROUPS[1]) + save + `</form>`;
+  const ask = section_html("Ask first", `<p class="sub">Unii waits for your yes before a tool call that matches a rule: a card in the chat, and a notification on phones with notifications on. A rule names tools (<code>*</code> for any characters, <code>!</code> to leave one out; device MCP tools are named <code>device_server__tool</code>) and, if any, a regular expression its arguments must match, in which <code>${esc(SCRATCH)}</code> is the device's scratch folder.</p><div class="set rules" data-key="ask"><div class="field"></div><p class="err"></p></div>`);
+  return head + error + none + `<form class="settings" autocomplete="off">` + group(GROUPS[0]) + profiles + ask + keys + group(GROUPS[1]) + save + `</form>`;
+}
+
+export function rules_html(rules: Rule[], defaults: boolean): string {
+  const one = (r: Rule, i: number) => {
+    const input = (cls: string, value: string, label: string, hint: string) => `<input class="${cls}" data-i="${i}" value="${esc(value)}" aria-label="${label}" placeholder="${esc(hint)}" maxlength="2000" spellcheck="false" autocapitalize="off">`;
+    const what = input("rwhat", r.what, "What it is", "What it is, as the card says it");
+    const tools = input("rtools", r.tools, "Tools", "Tools: shell, *__*send*, !*draft*");
+    const args = input("rargs", r.args, "Arguments", "Arguments match (empty: any)");
+    return `<div class="rule" data-i="${i}"><div class="name">${what}<button type="button" class="chip red rdel" data-i="${i}">Delete</button></div><div class="two">${tools}${args}</div></div>`;
+  };
+  const back = defaults ? "" : `<button type="button" class="chip rback">Restore the defaults</button>`;
+  return rules.map(one).join("") + `<div class="adds"><button type="button" class="chip rnew">Add rule</button>${back}</div>`;
 }
 
 export function offered(vendors: string[], models: string[]): string[] {

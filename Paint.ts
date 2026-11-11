@@ -13,6 +13,8 @@ export type Line = Run[];
 export const INK: Ink = { d: false, b: false, i: false, u: false, t: false, k: "", c: "", g: "" };
 export const DIM: Ink = { ...INK, d: true };
 
+const ASK_HOW = "Approve or deny it in the web app.";
+
 const MARK: Record<Md.Line["s"], Ink> = { " ": DIM, "-": { ...INK, c: Theme.ANSI.del }, "+": { ...INK, c: Theme.ANSI.add } };
 
 const GUTTER = 7;
@@ -155,6 +157,11 @@ function row_lines(row: View.Row, w: number): Line[] {
     }
     case "Cap": {
       return runs_wrap([Run(text_clean(row.text), { ...DIM, i: true })], w, false);
+    }
+    case "Ask": {
+      const title = [Run(" " + View.ASKS + " · " + text_clean(row.ask.what) + (row.who === "" ? "" : " · " + row.who) + " ", { ...INK, b: true })];
+      const how = runs_wrap([Run(ASK_HOW, { ...DIM, i: true })], w - 4, false);
+      return frame_lines([...call_lines(row.call, w - 4), [], ...how], w - 4, INK, title);
     }
   }
 }
