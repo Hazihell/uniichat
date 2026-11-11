@@ -152,7 +152,7 @@ export type Link = {
   open : (query: string) => WebSocket;
   post : (path: string, body: Upload) => Promise<Response>;
   hear : (msg: Server) => void;
-  lost : (up: boolean) => Promise<boolean>;
+  lost : (up: boolean, steady: boolean) => Promise<boolean>;
 };
 
 export type Act =
@@ -683,6 +683,7 @@ function view_live(v: View, agent: string | undefined): Live[] | null {
 export function link_open(v: View, link: Link): void {
   const ws   = link.open("?tab=" + v.tab + "&wire=" + WIRE);
   let heard  = Date.now();
+  let joined = 0;
   const tick = setInterval(() => {
     if (Date.now() - heard > PING) {
       void drop();
@@ -697,9 +698,10 @@ export function link_open(v: View, link: Link): void {
   }
   async function drop(): Promise<void> {
     const up = v.up;
+    const steady = up && Date.now() - joined > RETRY;
     shut();
-    if (await link.lost(up)) {
-      setTimeout(() => link_open(v, link), RETRY);
+    if (await link.lost(up, steady)) {
+      setTimeout(() => link_open(v, link), steady ? 0 : RETRY);
     }
   }
   function flush(): void {
@@ -758,6 +760,7 @@ export function link_open(v: View, link: Link): void {
     const join = msg.$ === "view" && !v.up;
     if (join) {
       v.up = true;
+      joined = Date.now();
       v.pages.clear();
     }
     link.hear(msg);

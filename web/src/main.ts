@@ -26,6 +26,9 @@ const DESK = matchMedia("(hover: hover)");
 
 const ME_WAIT = 4000;
 
+// a phone's resume from the background drops the link and brings it back within this
+const NET_WAIT = 3000;
+
 const NONE   = "No Claude or ChatGPT chats in that folder. Choose ~/.claude or ~/.codex.";
 
 const SCENES = name_text(`
@@ -50,6 +53,7 @@ const P = {
   used  : { ws: null as WebSocket | null, on: false, at: 0 },
   after : false,
   at    : "",
+  down  : 0,
 };
 
 const SCROLL = {
@@ -630,7 +634,13 @@ function me(): Promise<Response | null> {
   return fetch("/api/me", { signal: AbortSignal.timeout(ME_WAIT) }).catch(() => null);
 }
 
-async function lost(up: boolean): Promise<boolean> {
+async function lost(up: boolean, steady: boolean): Promise<boolean> {
+  if (up) {
+    P.down = steady ? Date.now() : 0;
+  }
+  if (steady) {
+    setTimeout(() => draw(true), NET_WAIT);
+  }
   draw(true);
   const res = up ? null : await me();
   if (res !== null && res.status === 401) {
@@ -1004,7 +1014,7 @@ function bars(): void {
   const stop = on && View.view_stoppable(v) && Box.box_blank();
   const tabs = View.view_tabs(v);
   const send = $(".send", HTMLButtonElement);
-  $(".net").hidden = v.up;
+  $(".net").hidden = v.up || Date.now() - P.down < NET_WAIT;
   $(".timers").hidden = v.timers.length === 0;
   $(".timers span").textContent = String(v.timers.length);
   markup($("#timers ul"), Html.timers_html(v.timers));
