@@ -17,6 +17,7 @@ import { EFFORTS, Pick } from "./Pick.ts";
 import { Run, type CallHooks, type Heard, type InboxHooks, type LoopHooks } from "./Run.ts";
 import type { Msg } from "./Server.ts";
 import * as Timer from "./Timer.ts";
+import * as Pins from "./Pins.ts";
 import { PING, TURN, limit_show, type Pending } from "./View.ts";
 import { err_why } from "./Err.ts";
 import { get, list as items, rec, text_of } from "./Json.ts";
@@ -181,6 +182,14 @@ const BOSS: Spec[] = [
   spec("schedules", "List the chat's schedules: id, when each comes next, its message.", {}, []),
   spec("unschedule", "Cancel a schedule, by its id.", { id: STR }, ["id"]),
   spec("stop", "Stop a subagent at once, by name, whatever it is doing (mid-call, waiting on a usage limit, running a tool on a device: that job is cancelled). Others keep running, and so do its background jobs, whose reports then reach you. Its report says it was stopped; its chat and scratch folder stay, so a later tell resumes it.", { name: STR, why: { type: "string", description: "Why, for its report." } }, ["name"]),
+  spec("pin", "Change the pins, listed under Pinned: add one (text, from: the id of the message it came from, until: YYYY-MM-DD for a temporary one), replace one by id (only the fields given change), unpin some by ids, or mark some used by ids.", {
+    action : { type: "string", enum: ["add", "replace", "unpin", "used"] },
+    text   : STR,
+    from   : INT,
+    until  : { type: "string", description: "YYYY-MM-DD: the last day a temporary pin holds." },
+    id     : INT,
+    ids    : { type: "array", items: INT },
+  }, ["action"]),
   spec("resume", "Wake every call on this server waiting for an AI service's usage limit (subagents, summaries), when the user says a limit was reset early. Each asks again once; one still limited waits again.", {}, []),
 ];
 const DEVICE = { device: { type: "string", description: "The name of the device to run on, one listed under Devices." } };
@@ -458,6 +467,9 @@ export namespace Tools {
       case "unschedule": {
         const id = String(args.id);
         return Tools.unschedule(tools, id) ? { text: "Cancelled " + id + ".", fail: false } : { text: "No schedule " + id + ".", fail: true };
+      }
+      case "pin": {
+        return Pins.tool(args);
       }
       case "stop": {
         return await Tools.halt(tools, String(args.name), args.why === undefined ? "" : text_of(args.why, "null"));
@@ -910,7 +922,7 @@ export namespace Tools {
     const run = Pick.ask(Tools.pick(tools, agent));
     const own = name_text(Memory.file_text(PROMPTS.prompt.file), config.NAME);
     const system = own === "" ? SUB : SUB + "\n\n" + AGENT_PROMPT + "\n\n" + own;
-    const blocks = [...agent.view, Tools.devices(tools), Tools.skills(tools), log];
+    const blocks = [...agent.view, Pins.block(false), Tools.devices(tools), Tools.skills(tools), log];
     return { ...run, system, blocks, searches: SEARCHES, server, agent: true, who: agent.name };
   }
 

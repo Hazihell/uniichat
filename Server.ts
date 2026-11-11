@@ -25,6 +25,7 @@ import { LIMIT, Limit } from "./Limit.ts";
 import { Run, type Heard } from "./Run.ts";
 import * as Service from "./Service.ts";
 import * as Timer from "./Timer.ts";
+import * as Pins from "./Pins.ts";
 import { PROMPTS, SEARCHES, Tools } from "./Tools.ts";
 import { JOB } from "./Machine.ts";
 import { ACTIVE, ASKS, FRAME, IDLE, IMAGES, live_push, MEDIA, PING, QUIT, SUMMARIES, TICK, TURN, WIRE, type Answer, type Live, type Part, type Pending, type Queued, type Server as Out, type Sums, type Talk as Meter, TOKEN, type Wait } from "./View.ts";
@@ -116,6 +117,7 @@ const SPARE      = 2 ** 30;
 const TIMER_TEXT = 200;
 const RING       = 60000;
 const WAKE       = 60000;
+const SWEEP      = 3600000;
 
 const QUEUED_TEXT = 4000;
 
@@ -254,6 +256,8 @@ export namespace Chat {
     mem.wait.add(() => Chat.progress(chat));
     chat.batch = Chat.resumed(chat);
     Chat.timed(chat);
+    Chat.sweep(chat);
+    setInterval(() => Chat.sweep(chat), SWEEP).unref();
     Memory.pump(mem);
     Chat.progress(chat);
     Chat.resume(chat, cut).finally(() => Chat.change(chat)).catch((err: unknown) => console.error("unii: resuming the chat: " + err_why(err)));
@@ -450,7 +454,7 @@ export namespace Chat {
     const server = Tools.at(chat.tools, "main");
     chat.eye = Chat.eye(mem, from);
     chat.socks.forEach((sock) => Chat.show(chat, sock));
-    const blocks = [...view, Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
+    const blocks = [...view, Pins.block(true), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools), { text: HEAD + text, mark: true }];
     const model = chat.pick.model;
     const used = (tokens: number) => {
       if (chat.pick.model === model) {
@@ -587,6 +591,11 @@ export namespace Chat {
     return true;
   }
 
+  // the pins whose time is up leave quietly, a note each, no push
+  export function sweep(chat: Chat): void {
+    Pins.sweep().forEach(({ pin, why }) => Chat.note(chat, "📌 unpinned (" + why + "): " + Pins.line(pin)));
+  }
+
   export function note(chat: Chat, text: string): void {
     Chat.hold(chat, () => Chat.push(chat, chat.main, "note", text));
   }
@@ -674,7 +683,7 @@ export namespace Chat {
 
   export function guess(chat: Chat): number {
     const mem = chat.mem;
-    const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools)];
+    const blocks = [...Memory.view(mem, mem.count, mem.view.parts, mem.talk), Pins.block(true), Tools.devices(chat.tools), Tools.skills(chat.tools), Tools.at_work(chat.tools)];
     const texts = [Tools.prompt("prompt"), JSON.stringify(Tools.list("main")), ...blocks.map((b) => b.text)];
     return Math.ceil(texts.reduce((n, text) => n + Memory.bytes(text), 0) / TOKEN);
   }
@@ -1642,6 +1651,9 @@ export namespace Main {
       case "/api/prompts": {
         return await Main.prompts(req);
       }
+      case "/api/pins": {
+        return await Main.pins(req, chat);
+      }
       case "/api/settings": {
         return await Main.settings(req);
       }
@@ -1751,6 +1763,17 @@ export namespace Main {
     const { file, def } = PROMPTS[which];
     write_whole(file, text === "" || text === def ? null : text + "\n");
     return Response.json(read());
+  }
+
+  // the Settings page's list of pins: read them, or unpin one ({ unpin: id })
+  export async function pins(req: Request, chat: Chat): Promise<Response> {
+    if (req.method === "POST") {
+      const pin = Pins.unpin(Number(get(await req.json().catch(() => null), "unpin")));
+      if (pin !== null) {
+        Chat.note(chat, "📌 unpinned by the user: " + Pins.line(pin));
+      }
+    }
+    return Response.json(Pins.read());
   }
 
   export async function http(req: Request, server: Bun.Server<Sock["data"]>): Promise<Response | undefined> {

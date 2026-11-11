@@ -7,6 +7,7 @@ import { SCRATCH, type Rule } from "../../Rules.ts";
 import type { Key, Page, Row } from "../../Settings.ts";
 import * as Theme from "../../Theme.ts";
 import * as Timer from "../../Timer.ts";
+import type { Pin } from "../../Pins.ts";
 import * as View from "../../View.ts";
 
 // this browser's notifications (main.ts notify_state): off, on, blocked
@@ -179,7 +180,19 @@ export function account_html(prompts: View.Prompts | null, notify: Notify | null
   const mine    = section_html("Prompts", prompts === null ? unread : prompt_html("prompt", prompts.prompt.text, name_text("The user prompt: Unii's system prompt in every turn; its subagents get it too once you change it. Add who you are and how you want work done at its end. prompt.md in the server's folder; empty: the built-in one.", NAME))
     + prompt_html("compact", prompts.compact.text, "The compaction prompt: all a summary of the memory gets, nothing else. compact.md in the server's folder; empty: the built-in one."));
   const mcp     = section_html("MCP servers", `<div class="mcp"></div>`);
-  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + mine + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
+  const pins    = section_html("Pins", `<p class="sub">${esc(name_text("What Unii learned about you and keeps outside the memory's compression, in every chat. pins.json in the server's folder.", NAME))}</p><div class="pins"></div>`);
+  return `<a class="back" href="/" data-go="/">← Chat</a><h1>Settings</h1>` + pins + mine + section_html("This browser", acts.join("")) + mcp + `<div class="owned"></div>`;
+}
+
+export function pins_html(pins: Pin[] | null): string {
+  if (pins === null) {
+    return `<p class="sub">Could not read the pins.</p>`;
+  }
+  if (pins.length === 0) {
+    return `<p class="sub">None yet.</p>`;
+  }
+  const note = (pin: Pin) => [pin.from === null ? "" : "#" + pin.from, pin.until === null ? "" : "until " + pin.until, "used " + pin.used].filter((s) => s !== "").join(" · ");
+  return pins.map((pin) => `<div class="item"><p>${esc(pin.text)}<small>${esc(note(pin))}</small></p><button class="chip unpin" data-id="${pin.id}">Unpin</button></div>`).join("");
 }
 
 function prompt_html(name: string, text: string, note: string): string {
