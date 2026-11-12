@@ -245,7 +245,7 @@ export namespace Chat {
       asked  : (a) => Chat.asked(a),
       chats  : async (args, signal) => (chat.side === null ? Main.side_act(args) : await Main.main_act(chat, args, signal)),
       job    : (side, who, text) => Main.job_to(side, who, text),
-    }, side?.name ?? null, side === null ? undefined : Main.chat.tools.devices);
+    }, side?.name ?? null, side === null ? undefined : Main.chat.tools.devices, side === null ? null : Main.chat.tools.mcp);
     Chat.keep_pick(mem.pick);
     const pick = Pick.load(mem.pick, config.OFFER, config.PICK);
     const chat: Chat = {

@@ -225,12 +225,12 @@ const SKILL: Spec = spec("skill", "Load a skill listed under Skills: its SKILL.m
 
 export namespace Tools {
 
-  // a side chat shares the main chat's devices: one connection per computer
-  export function serve(mem: Memory, main: Run<Pending, Msg>, log: Log, side: string | null = null, devices = new Map<string, Device>()): Tools {
+  // a side chat shares the main chat's devices and their MCP servers: one connection and one browser per computer
+  export function serve(mem: Memory, main: Run<Pending, Msg>, log: Log, side: string | null = null, devices = new Map<string, Device>(), shared: Servers | null = null): Tools {
     const key = crypto.randomUUID();
     const url = Tools.base() + key + "/";
     const run = (device: string, job: Job, signal: AbortSignal) => Tools.job(tools, device, job, signal, crypto.randomUUID());
-    const mcp = Mcp.servers((text) => log.note(text), run, (device) => Tools.live(tools.devices.get(device)));
+    const mcp = shared ?? Mcp.servers((text) => log.note(text), run, (device) => Tools.live(tools.devices.get(device)));
     const gate = Gate.open(mem.dir + "/asks.json", () => log.change());
     const tools: Tools = { mem, devices, agents: new Map(), mcp, next: null, left: false, key, url, main, log, gate, side };
     CHATS.set(key, tools);
