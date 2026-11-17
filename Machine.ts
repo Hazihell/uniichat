@@ -643,7 +643,8 @@ export namespace Machine {
 }
 
 // a SKILL.md's YAML frontmatter, from its first 64 KB; a regular file only,
-// so a FIFO or device can't hang the device
+// so a FIFO or device can't hang the device. Lenient like Claude Code: a
+// plain value with ": " in it is read as text, not dropped.
 function skill_head(file: string): unknown {
   if (!fs.statSync(file).isFile()) {
     return null;
@@ -654,7 +655,14 @@ function skill_head(file: string): unknown {
   fs.closeSync(fd);
   const text = buf.toString("utf8", 0, size).replace(/^\uFEFF/, "");
   const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?(\n|$)/);
-  return m === null ? null : Bun.YAML.parse(m[1]);
+  if (m === null) {
+    return null;
+  }
+  try {
+    return Bun.YAML.parse(m[1]);
+  } catch {
+    return Bun.YAML.parse(m[1].replace(/^([A-Za-z0-9_-]+):[ \t]+([^\s"'[{|>&*!%@`#].*?)[ \t]*$/gm, (_, key: string, value: string) => key + ": " + JSON.stringify(value)));
+  }
 }
 
 function text_diff(file: string, was: string, now: string): string {
